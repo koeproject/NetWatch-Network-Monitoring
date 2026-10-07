@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"system"}],"itemid":45497,"name":"Discovery queue","clock":1791395297,"ns":455300137,"value":0,"type":3}

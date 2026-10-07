@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose:*)",
+      "Bash(docker run:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker ps:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(mypy:*)",
+      "Bash(npm run:*)",
+      "Bash(./ops/check-boundary.sh)",
+      "WebFetch(domain:www.zabbix.com)",
+      "WebFetch(domain:git.zabbix.com)",
+      "WebFetch(domain:blog.zabbix.com)"
+    ],
+    "deny": [
+      "Bash(git clone:*)",
+      "Bash(gh repo clone:*)",
+      "Bash(git submodule add:*)",
+      "Bash(curl:*github.com*)",
+      "Bash(wget:*github.com*)",
+      "Edit(./templates/upstream/**)",
+      "Write(./templates/upstream/**)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/ops/check-boundary.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

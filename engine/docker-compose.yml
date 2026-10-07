@@ -1,0 +1,111 @@
+# engine/docker-compose.yml — hand-written, never downloaded (CLAUDE.md §5).
+#
+# The monitoring engine: TimescaleDB, Zabbix server, Zabbix web (API).
+# Built one service at a time. Step 2 brings up the database only.
+#
+# Image tags are pinned to the full tag. Zabbix 7.0.29 supports TimescaleDB
+# up to 2.28.X; 2.29.X needs 7.0.30 (CLAUDE.md §7). Re-check that pairing
+# before changing either tag.
+
+name: netwatch
+
+services:
+  db:
+    image: timescale/timescaledb:2.28.3-pg16
+    container_name: NetWatch-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in engine/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in engine/.env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in engine/.env}
+      # Applied once, when the data volume is first initialised.
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # Docker's default /dev/shm is 64 MB; PostgreSQL parallel queries use it
+    # and fail with "could not resize shared memory segment" when it runs out.
+    shm_size: 256mb
+    # No "ports:" on purpose. Only containers on the engine network reach the
+    # database. Use "docker compose exec db psql ..." from the host.
+    networks:
+      - engine
+    healthcheck:
+      # $$ makes compose pass a literal $ so the variable expands inside the container.
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-7.0.29
+    container_name: NetWatch-server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # ชื่อ service ของ DB ใน compose นี้ (image default คือ "postgres-server")
+      DB_SERVER_HOST: db
+      DB_SERVER_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in engine/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in engine/.env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in engine/.env}
+      # ใช้ timescaledb.sql หลัง import schema: history/trends -> hypertables
+      # มีผลแค่ start ครั้งแรกบน DB ว่างเท่านั้น
+      ENABLE_TIMESCALEDB: "true"
+      # Connector workers (default คือ 0 = Connector สร้างได้แต่ไม่ส่งอะไรเลย (CLAUDE.md §3))
+      ZBX_STARTCONNECTORS: ${ZBX_STARTCONNECTORS:-2}
+      # SNMP ข้าม WAN ไปถึง access switch, default 3s แคบเกินไป
+      ZBX_TIMEOUT: ${ZBX_TIMEOUT:-10}
+    networks:
+      - engine
+    # ไม่มี "ports:" — server poll SNMP ออกไปเอง ยังไม่มี agent/proxy ต่อเข้า 10051
+    healthcheck:
+      test: [ "CMD-SHELL", "nc -z 127.0.0.1 10051 || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.0.29
+    container_name: NetWatch-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      zabbix-server:
+        condition: service_started
+    environment:
+      # frontend อ่าน/เขียน DB เดียวกับ server โดยตรง
+      DB_SERVER_HOST: db
+      DB_SERVER_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in engine/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in engine/.env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in engine/.env}
+      # ใช้เช็ก "Zabbix server is running" และส่งคำสั่งไป server
+      ZBX_SERVER_HOST: zabbix-server
+      ZBX_SERVER_PORT: "10051"
+      ZBX_SERVER_NAME: ${ZBX_SERVER_NAME:-NetWatch engine}
+      # ต้องตรงกับ TZ ของ backend ไม่งั้นเวลาที่อ่านจาก API จะเพี้ยน
+      PHP_TZ: ${PHP_TZ:-Asia/Bangkok}
+    networks:
+      - engine
+    ports:
+      # Loopback only — ENGINE_URL ตอน dev คือ http://127.0.0.1:8080
+      - "127.0.0.1:${ZBX_WEB_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/index.php || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+volumes:
+  db-data:
+    name: netwatch-db-data
+
+networks:
+  engine:
+    name: netwatch-engine

@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"internal-process"}],"itemid":45498,"name":"Utilization of discovery manager internal processes, in %","clock":1791395298,"ns":456469971,"value":0,"type":0}

@@ -1,0 +1,2 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"system"}],"itemid":23276,"name":"Trend write cache, % used","clock":1791395276,"ns":435189066,"value":0.1651763916015625,"type":0}
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"system"},{"tag":"component","value":"nvps"}],"itemid":10076,"name":"Number of processed numeric (unsigned) values per second","clock":1791395276,"ns":435216722,"value":0.13319517664302014,"type":0}

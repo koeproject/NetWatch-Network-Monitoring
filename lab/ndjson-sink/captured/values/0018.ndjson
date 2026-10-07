@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"internal-process"}],"itemid":23252,"name":"Utilization of alerter internal processes, in %","clock":1791395312,"ns":472262067,"value":0,"type":0}

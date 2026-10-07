@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"internal-process"}],"itemid":23253,"name":"Utilization of configuration syncer internal processes, in %","clock":1791395313,"ns":473712853,"value":0.44135121371583774,"type":0}
