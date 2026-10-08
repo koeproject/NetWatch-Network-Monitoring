@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"lab"}],"itemid":50740,"name":"Lab event probe","clock":1791395301,"ns":288186659,"value":1,"type":3}

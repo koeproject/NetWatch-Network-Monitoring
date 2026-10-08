@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"internal-process"}],"itemid":44790,"name":"Utilization of connector worker internal processes, in %","clock":1791395310,"ns":470121335,"value":0.19373315363881402,"type":0}

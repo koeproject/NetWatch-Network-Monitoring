@@ -1,0 +1,873 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>Phase 1 Guide — acme-nms</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 16mm 14mm; }
+  :root { --ink:#1f2328; --muted:#57606a; --line:#d0d7de; --accent:#1f5fa8; --bg:#f6f8fa;
+          --ok:#1a7f37; --warn:#9a6700; --bad:#b42318; }
+  body { font-family: "Leelawadee UI", "Noto Sans Thai", Tahoma, sans-serif; color:var(--ink);
+         font-size: 10.5pt; line-height: 1.6; margin:0; }
+  h1 { font-size: 22pt; margin: 0 0 6px; }
+  h2 { font-size: 15pt; color: var(--accent); border-bottom: 2px solid var(--accent);
+       padding-bottom: 4px; margin: 0 0 12px; break-before: page; }
+  h2.first { break-before: auto; }
+  h3 { font-size: 12pt; margin: 18px 0 8px; padding: 4px 10px; background: var(--bg);
+       border-left: 4px solid var(--accent); break-after: avoid; }
+  h4 { font-size: 10.5pt; margin: 12px 0 4px; color: var(--muted); break-after: avoid; }
+  p { margin: 6px 0; }
+  code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 9pt; background: var(--bg);
+         padding: 0 3px; border-radius: 3px; }
+  pre { font-family: Consolas, "Cascadia Mono", monospace; font-size: 8.4pt; line-height: 1.45;
+        background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+        white-space: pre-wrap; word-break: break-word; margin: 6px 0 10px; break-inside: avoid; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  table { border-collapse: collapse; width: 100%; margin: 6px 0 12px; font-size: 9.5pt; break-inside: avoid; }
+  th, td { border: 1px solid var(--line); padding: 4px 7px; vertical-align: top; text-align: left; }
+  th { background: var(--bg); }
+  .meta { color: var(--muted); font-size: 9.5pt; }
+  .kv { display:grid; grid-template-columns: 90px 1fr; gap: 2px 10px; margin: 6px 0; }
+  .kv b { color: var(--muted); font-weight: 600; }
+  .note { border: 1px solid var(--line); border-left: 4px solid var(--warn); background: #fff8e6;
+          padding: 6px 10px; margin: 8px 0; break-inside: avoid; }
+  .rule { border: 1px solid var(--line); border-left: 4px solid var(--bad); background: #fff1f0;
+          padding: 6px 10px; margin: 8px 0; break-inside: avoid; }
+  .pass { border: 1px solid var(--line); border-left: 4px solid var(--ok); background: #eefbf1;
+          padding: 6px 10px; margin: 8px 0; break-inside: avoid; }
+  .ok { color: var(--ok); font-weight: 700; }
+  ul, ol { margin: 4px 0 8px; padding-left: 22px; }
+  li { margin: 2px 0; }
+  .cover { height: 250mm; display:flex; flex-direction:column; justify-content:center; }
+  .cover .tag { color: var(--accent); font-weight: 700; letter-spacing: .5px; }
+  .toc li { margin: 3px 0; }
+  .explain { margin: 2px 0 10px; }
+  .explain li { margin: 3px 0; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="tag">ACME-NMS · PHASE 1 GUIDE</div>
+  <h1>Phase 1: Backend core — วิธีทำ และคำอธิบายโค้ด</h1>
+  <p style="font-size:12pt;color:var(--muted)">ทำ backend ให้ครบทั้ง 2 ทาง: รับข้อมูลที่ engine push มา (Connector) และให้ portal อ่านออกไป (REST + SSE)
+  โดยแยกจาก engine ตามกฎ §3 และ §4 ของ <code>CLAUDE.md</code></p>
+  <p class="meta" style="margin-top:24px">
+    ฉบับวันที่ 9 ตุลาคม 2026 · คู่กับ <code>docs/rebuild-plan.pdf</code> (หน้า 11–13)<br>
+    ทดสอบกับ Zabbix 7.0.29 · TimescaleDB 2.28.3 (PG16) · Redis 7.4.5 · Python 3.12 (container) / 3.14 (local venv)<br>
+    ผลการทดสอบในเอกสารนี้เป็นผลจริงจากเครื่องนี้ ไม่ใช่ตัวอย่างสมมติ
+  </p>
+</section>
+
+<h2 class="first">สารบัญ</h2>
+<ol class="toc">
+  <li>สรุปผล: Phase 1 ผ่านเงื่อนไขปิดครบ</li>
+  <li>ภาพรวม: ไฟล์ทั้งหมด และเส้นทางข้อมูล</li>
+  <li>เตรียมเครื่อง: dependency และ <code>backend/.env</code></li>
+  <li>1.1 Domain: models, enums, ports</li>
+  <li>1.2 Connector schema</li>
+  <li>1.3 Mapper, adapter, connector ingest</li>
+  <li>1.4 Store ของเราเอง</li>
+  <li>1.5 <code>api/hooks.py</code>: ตัวรับ push จริง</li>
+  <li>1.6 Read services + API endpoints</li>
+  <li>1.7 Multi-tenant และ auth</li>
+  <li>1.8 Live updates: bus, SSE, cache</li>
+  <li>1.9 Wiring และ test</li>
+  <li>ทดสอบแบบ end-to-end กับ engine จริง (Docker)</li>
+  <li>Decision ที่ปิดใน Phase นี้ (ADR 0006–0008)</li>
+  <li>ข้อจำกัดที่รู้อยู่ และงานต่อใน Phase 2</li>
+</ol>
+
+<div class="note"><b>วิธีอ่าน:</b> แต่ละขั้นมีหัวข้อเหมือนกันหมด คือ เป้าหมาย → ไฟล์ → อธิบายโค้ด → ตรวจว่าผ่าน → ข้อผิดพลาดที่พบบ่อย
+โค้ดในเอกสารเป็น <b>ส่วนที่สำคัญ</b> ของแต่ละไฟล์ โค้ดเต็มอยู่ใน repo ตาม path ที่ระบุ
+คำสั่งทั้งหมดรันจาก <b>Git Bash ที่ root ของ repo</b> ยกเว้นที่เขียนว่า <code>cd backend</code></div>
+
+<!-- ============================================================ -->
+<h2>1. สรุปผล: Phase 1 ผ่านเงื่อนไขปิดครบ</h2>
+
+<p>เงื่อนไขปิด phase จาก rebuild plan: <i>"push probe เป็น 1 แล้ว problem ต้องโผล่ใน API ของเราและมาทาง SSE ภายในไม่กี่วินาที โดยไม่มีการเรียก
+<code>history.get</code>, pytest ผ่านทั้งหมด, check-boundary.sh ได้ OK"</i></p>
+
+<table>
+<tr><th style="width:38%">เงื่อนไข</th><th>ผลจริง (9 ต.ค. 2026)</th><th style="width:8%">ผ่าน</th></tr>
+<tr><td>push probe = 1 → problem มาทาง SSE</td><td>push เวลา 18:22:48, SSE ได้ <code>event: problem</code> ref <code>P22</code> เวลา 18:22:51 (<b>3 วินาที</b>)</td><td class="ok">✔</td></tr>
+<tr><td>problem โผล่ใน <code>GET /api/problems</code></td><td><code>[{"ref":"P22","severity":"warning","active":true,…}]</code></td><td class="ok">✔</td></tr>
+<tr><td>push probe = 0 → resolved</td><td>SSE ได้ข้อความที่ 2 <code>"active": false</code>, <code>/api/problems</code> คืน <code>[]</code></td><td class="ok">✔</td></tr>
+<tr><td>ไม่มี <code>history.get</code></td><td><code>grep -rn "history\.get" backend/app</code> → ไม่พบ; เรียก <code>/metrics</code> + <code>/latest</code> 20 ครั้ง → engine ได้ request <b>0</b> ครั้ง</td><td class="ok">✔</td></tr>
+<tr><td>pytest ผ่านทั้งหมด</td><td>local: <b>78 passed</b>, 8 skipped (Postgres) · ใน container: Postgres store <b>16 passed</b></td><td class="ok">✔</td></tr>
+<tr><td><code>check-boundary.sh</code></td><td><code>check-boundary: OK (backend/app/domain backend/app/services backend/app/api backend/app/auth)</code></td><td class="ok">✔</td></tr>
+<tr><td>store แยกจาก engine</td><td><code>psql -U acme_app -d zabbix</code> → <code>FATAL: permission denied for database "zabbix"</code></td><td class="ok">✔</td></tr>
+<tr><td>ADR 0004: tenant token เห็นเฉพาะ host ของตัวเอง</td><td><code>ADR 0004 check, tenant lab: PASS (sees ['Zabbix server'], expected ['Zabbix server'])</code></td><td class="ok">✔</td></tr>
+</table>
+
+<div class="note"><b>สิ่งที่ผมเปลี่ยนในระบบที่รันอยู่ (ควรรู้):</b>
+<ul>
+<li>สร้าง role <code>acme_app</code> และ database <code>acme</code>, <code>acme_test</code> ใน Postgres ของ engine และ <b>REVOKE CONNECT ON DATABASE zabbix FROM PUBLIC</b></li>
+<li>Connector id 1, 2 เปลี่ยนชื่อเป็น <code>acme-values</code> / <code>acme-events</code> และชี้ไปที่ <code>http://backend:8000/hooks/…</code> (เดิมชี้ไป sink) ส่วน id 3 (<code>lab-sink-probes</code>) ถูก <b>disable</b></li>
+<li>สร้าง user group <code>acme-lab-readers</code>, user <code>acme-lab-reader</code> และ token <code>acme-read</code> ใน engine สำหรับ tenant ทดลอง <code>lab</code></li>
+<li>เพิ่ม key ใหม่ใน <code>backend/.env</code> (ไฟล์นี้ gitignored): <code>STORE_URL</code>, <code>ACME_DB_PASSWORD</code>, <code>PUSH_TOKEN</code>, <code>SESSION_SECRET</code>, <code>TOKEN_KEY</code>, <code>COOKIE_SECURE</code></li>
+<li>container ใหม่ 2 ตัว: <code>NetWatch-backend</code>, <code>NetWatch-redis</code></li>
+</ul></div>
+
+<!-- ============================================================ -->
+<h2>2. ภาพรวม: ไฟล์ทั้งหมด และเส้นทางข้อมูล</h2>
+
+<h3>เส้นทางข้อมูล</h3>
+<pre>
+ ┌──────────── engine (ไม่แก้สักบรรทัด) ────────────┐
+ │ poll → item → trigger → event                    │
+ │   └─ Connector push (NDJSON, Bearer PUSH_TOKEN) ─┼──► api/hooks.py ──► services/ingest.py
+ │ JSON-RPC API  ◄── zabbix/adapter.py ◄─┐          │                       │
+ └───────────────────────────────────────┼──────────┘     PushDecoderPort  │ (zabbix/connector_ingest.py
+                                         │                 = schema + mapper)│
+                 MonitoringEnginePort ───┘                                  ▼
+                 (รายชื่ออุปกรณ์เท่านั้น, cache 60 s)          StorePort (store/ ของเรา, DB "acme")
+                         │                                                  │      │
+                 services/inventory.py ──── กรองตาม tenant ───► metrics / problems  │
+                         │                                                  ▼      │
+                 api/devices.py, api/problems.py  ◄──────────────── REST          │
+                 api/stream.py (SSE) ◄── services/stream.py ◄── BusPort (Redis) ◄──┘ ingest publish
+</pre>
+
+<h3>ไฟล์ที่สร้าง/แก้ใน Phase 1</h3>
+<table>
+<tr><th>ขั้น</th><th>ไฟล์</th><th>หน้าที่</th></tr>
+<tr><td>1.1</td><td><code>backend/app/domain/enums.py, models.py, ports.py</code></td><td>ภาษาของเรา + สัญญา (Protocol) ทุกตัว</td></tr>
+<tr><td>1.2</td><td><code>backend/app/zabbix/connector_schema.py</code><br><code>backend/tests/fixtures/connector/*.ndjson</code></td><td>ตรวจรูปแบบ NDJSON จาก payload จริง</td></tr>
+<tr><td>1.3</td><td><code>backend/app/zabbix/mapper.py, adapter.py, connector_ingest.py</code></td><td>ล่ามแปล engine ↔ domain</td></tr>
+<tr><td>1.4</td><td><code>backend/app/store/sqlite_store.py, postgres_store.py</code>, <code>backend/app/crypto.py</code>, <code>ops/init-store.sh</code></td><td>store ของเรา + เข้ารหัส tenant token</td></tr>
+<tr><td>1.5</td><td><code>backend/app/api/hooks.py</code>, <code>backend/app/services/ingest.py</code></td><td>รับ push → store → bus</td></tr>
+<tr><td>1.6</td><td><code>backend/app/services/inventory.py, metrics.py, problems.py, views.py</code><br><code>backend/app/api/devices.py, problems.py, deps.py</code></td><td>REST API ให้ portal</td></tr>
+<tr><td>1.7</td><td><code>backend/app/auth/passwords.py, sessions.py, service.py, cli.py</code>, <code>backend/app/api/auth.py</code><br><code>backend/app/zabbix/lab_tenant.py</code></td><td>login, user → tenant, tenant ทดลอง</td></tr>
+<tr><td>1.8</td><td><code>backend/app/bus/memory.py, redis_bus.py</code>, <code>backend/app/cache.py</code>, <code>backend/app/services/stream.py</code>, <code>backend/app/api/stream.py</code></td><td>SSE ข้าม worker ผ่าน Redis</td></tr>
+<tr><td>1.9</td><td><code>backend/app/container.py, main.py, config.py</code>, <code>backend/Dockerfile</code>, <code>backend/docker-compose.dev.yml</code>, <code>backend/tests/*</code></td><td>ประกอบทุกส่วน + test</td></tr>
+<tr><td>ADR</td><td><code>docs/decisions/0006-*.md, 0007-*.md, 0008-*.md</code>, <code>CLAUDE.md</code> §8</td><td>decision ใหม่ 3 เรื่อง</td></tr>
+</table>
+
+<div class="rule"><b>กฎที่ทุกไฟล์ต้องผ่าน:</b> ใน <code>domain/ services/ api/ auth/</code> ห้ามมีคำว่า <code>zabbix</code>, <code>hostid</code>, <code>eventid</code>, <code>itemid</code>, <code>triggerid</code>, <code>clock</code>, <code>ns</code>
+แม้แต่ใน comment ส่วนที่รู้จัก engine ได้มีแค่ <code>backend/app/zabbix/**</code> และ <code>backend/app/container.py</code>
+hook ของ Claude Code รัน <code>ops/check-boundary.sh</code> ทุกครั้งที่มีการเขียนไฟล์</div>
+
+<!-- ============================================================ -->
+<h2>3. เตรียมเครื่อง</h2>
+
+<h3>Dependency (pip เท่านั้น ไม่ clone อะไร)</h3>
+<p>ไฟล์: <code>backend/pyproject.toml</code> เพิ่ม <code>fastapi</code>, <code>uvicorn</code>, <code>redis</code>, <code>asyncpg</code>, <code>cryptography</code> และ <code>pytest</code> (extra <code>dev</code>)</p>
+<pre>cd backend
+.venv/Scripts/python -m pip install -e ".[dev]"</pre>
+<table>
+<tr><th>Package</th><th>ใช้ที่</th><th>ทำไม</th></tr>
+<tr><td><code>fastapi</code> + <code>uvicorn</code></td><td><code>main.py</code>, <code>api/</code></td><td>web framework + ASGI server</td></tr>
+<tr><td><code>asyncpg</code></td><td><code>store/postgres_store.py</code></td><td>driver Postgres แบบ async</td></tr>
+<tr><td><code>redis</code></td><td><code>bus/redis_bus.py</code>, <code>cache.py</code></td><td>pub/sub ข้าม worker + cache</td></tr>
+<tr><td><code>cryptography</code></td><td><code>crypto.py</code></td><td>Fernet เข้ารหัส tenant token ใน DB</td></tr>
+</table>
+<p>SQLite, scrypt (hash password) และ HMAC (session) ใช้ <b>stdlib</b> ไม่ต้องลงเพิ่ม</p>
+
+<h3><code>backend/.env</code>: key ใหม่</h3>
+<pre># ดู backend/.env.example — สร้างค่าแต่ละตัวด้วยคำสั่งในคอมเมนต์
+STORE_URL=sqlite:///./acme-store.db        # local; ใน container ใช้ Postgres (ตั้งโดย compose)
+ACME_DB_PASSWORD=...                       # รหัสของ role acme_app
+PUSH_TOKEN=...      # python -c "import secrets; print(secrets.token_urlsafe(32))"
+SESSION_SECRET=...  # เหมือนกัน (อย่างน้อย 32 ตัวอักษร)
+TOKEN_KEY=...       # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+COOKIE_SECURE=false # เฉพาะ local http</pre>
+<div class="note"><b>ข้อผิดพลาดที่พบบ่อย:</b> ใช้ <code>TOKEN_KEY</code> ที่ไม่ได้มาจาก <code>Fernet.generate_key()</code> → <code>ValueError: Fernet key must be 32 url-safe base64-encoded bytes</code>
+· <b>ห้ามเปลี่ยน</b> <code>TOKEN_KEY</code> หลังบันทึก tenant แล้ว เพราะ token เดิมจะถอดรหัสไม่ได้ (ต้องบันทึก tenant ใหม่)
+· <code>ENGINE_TOKEN</code> (admin) ไม่จำเป็นสำหรับ backend ที่รันอยู่แล้ว compose จะตั้งให้เป็นค่าว่างใน container</div>
+
+<!-- ============================================================ -->
+<h2>4. ขั้น 1.1 — Domain: models, enums, ports</h2>
+<div class="kv"><b>เป้าหมาย</b><span>นิยามภาษาของ product เอง ไม่ผูกกับ engine</span>
+<b>ไฟล์</b><span><code>backend/app/domain/enums.py</code>, <code>models.py</code>, <code>ports.py</code></span></div>
+
+<h3>enums.py</h3>
+<pre><code>class Severity(IntEnum):
+    INFO = 0
+    WARNING = 1
+    MINOR = 2
+    MAJOR = 3
+    CRITICAL = 4
+
+class DeviceStatus(StrEnum):
+    UP = "up"; DOWN = "down"; UNKNOWN = "unknown"; MAINTENANCE = "maintenance"; DISABLED = "disabled"</code></pre>
+<ul class="explain">
+<li><b>IntEnum</b> ทำให้เรียงลำดับได้: <code>severity &gt;= Severity.MAJOR</code> ใช้กรองได้ตรงๆ</li>
+<li>ตัวเลขของเรา<b>ไม่ต้องตรง</b>กับของ engine (engine มี 0–5) การแปลงอยู่ใน <code>mapper.py</code> ที่เดียว</li>
+<li><b>StrEnum</b>: ส่งออกเป็น JSON ได้ค่าอ่านรู้เรื่อง (<code>"up"</code>) ไม่ใช่ตัวเลข</li>
+</ul>
+
+<h3>models.py</h3>
+<pre><code>def _require_aware(field: str, value: datetime | None) -> None:
+    if value is not None and value.tzinfo is None:
+        raise ValueError(f"{field} must be timezone-aware, got naive {value!r}")
+
+@dataclass(frozen=True, slots=True)
+class MetricPoint:
+    device_ref: str
+    metric: str
+    ts: datetime
+    value: float
+
+    def __post_init__(self) -> None:
+        _require_aware("ts", self.ts)</code></pre>
+<ul class="explain">
+<li><b><code>@dataclass(frozen=True)</code></b>: แบบฟอร์มที่กรอกแล้วแก้ไม่ได้ จึงส่งข้าม worker หรือเก็บใน cache ได้ปลอดภัย</li>
+<li><b><code>slots=True</code></b>: ใช้หน่วยความจำน้อยลง และกันการพิมพ์ชื่อ attribute ผิด</li>
+<li><b><code>__post_init__</code></b>: รันทันทีหลังสร้าง object ถ้า <code>datetime</code> ไม่มี timezone ก็ error ตรงนั้นเลย ดีกว่าไปเจอทีหลังเป็นกราฟเลื่อน 7 ชั่วโมง</li>
+<li><code>device_ref</code> เป็น <code>str</code> แบบ <b>opaque</b> คือ services ห้ามแกะความหมายของมัน</li>
+<li>มี <code>Device</code>, <code>MetricPoint</code>, <code>Problem</code> ตาม plan และเพิ่ม 3 ตัว:
+  <code>ProblemResolution</code> (event "หายแล้ว" ที่ engine ส่งมาโดยไม่มีชื่อหรือ host), <code>Tenant</code> และ <code>User</code> (ใช้ใน 1.7)</li>
+</ul>
+
+<h3>ports.py</h3>
+<pre><code>@runtime_checkable
+class MonitoringEnginePort(Protocol):
+    async def list_devices(self, token: str) -> list[Device]: ...
+    async def get_device(self, ref: str, token: str) -> Device: ...
+
+class PushDecoderPort(Protocol):
+    def decode_values(self, body: bytes) -> list[MetricPoint]: ...
+    def decode_events(self, body: bytes) -> list[Problem | ProblemResolution]: ...
+
+class StorePort(Protocol): ...      # write_metrics, open_problem, resolve_problem, series, latest, problems, tenants/users
+class BusPort(Protocol): ...        # publish, subscribe
+class CachePort(Protocol): ...      # get, set
+
+class DeviceNotFound(LookupError): ...
+class EngineUnavailable(RuntimeError): ...</code></pre>
+<ul class="explain">
+<li><b>Protocol</b> = "ประกาศรับสมัครงาน" คือ class ไหนมี method ตรงกันก็ใช้ได้ ไม่ต้อง inherit ส่วน <code>@runtime_checkable</code> ทำให้ test เช็คได้ด้วย <code>isinstance(adapter, MonitoringEnginePort)</code></li>
+<li><b>MonitoringEnginePort ไม่มี method อ่าน history</b> อันนี้จงใจ ถ้าวันไหนอยากเพิ่ม <code>get_history</code> แปลว่ากำลังจะละเมิด §3</li>
+<li><b>token เป็น parameter ทุก method</b> (ADR 0004) ทำให้ read path ใช้ token ของ tenant เสมอ</li>
+<li><code>EngineUnavailable</code> มีไว้ให้ <code>api/</code> ตอบ 502 ได้โดย<b>ไม่ต้องรู้จัก</b> error class ของ engine</li>
+<li>port อื่นๆ (Store, Bus, Cache, PushDecoder) อยู่ไฟล์เดียวกัน ทำให้ services พึ่ง <code>domain/ports.py</code> อย่างเดียว</li>
+</ul>
+
+<h4>ตรวจว่าผ่าน</h4>
+<pre>bash ops/check-boundary.sh
+# check-boundary: OK (backend/app/domain)
+cd backend &amp;&amp; .venv/Scripts/python -c "import app.domain.ports; print('ok')"
+# ok</pre>
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul><li>เขียนคำต้องห้ามใน <b>comment/docstring</b> เช่น "ไม่ใช้คู่ clock/ns" แค่นี้ก็ fail แล้ว เพราะ script ใช้ grep ทั้งไฟล์</li>
+<li>ใช้ <code>datetime.utcnow()</code> ซึ่งคืนค่า naive ให้ใช้ <code>datetime.now(UTC)</code></li>
+<li><code>ref: int</code> เพราะเห็นว่า ID ของ engine เป็นตัวเลข ให้ใช้ <code>str</code> เสมอ</li></ul>
+
+<!-- ============================================================ -->
+<h2>5. ขั้น 1.2 — Connector schema</h2>
+<div class="kv"><b>เป้าหมาย</b><span>แปลง NDJSON ที่ engine push มาเป็น object ที่ validate แล้ว โดยเขียนจาก payload จริง</span>
+<b>ไฟล์</b><span><code>backend/app/zabbix/connector_schema.py</code>, <code>backend/tests/fixtures/connector/*.ndjson</code> (copy จาก <code>lab/ndjson-sink/captured/</code>), <code>backend/tests/test_connector_schema.py</code></span></div>
+
+<h3>โค้ดหลัก</h3>
+<pre><code>class _Line(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+class ValueLine(_Line):
+    host: HostRef
+    itemid: int
+    name: str
+    clock: int
+    ns: int = 0
+    value: int | float | str      # int ก่อน float: counter แบบ unsigned ไม่เสียความแม่น
+    type: int                     # value_type: 0 float, 1 char, 2 log, 3 unsigned, 4 text
+
+class ProblemLine(_Line):
+    value: Literal[1]
+    eventid: int; clock: int; ns: int = 0
+    name: str; severity: int; hosts: list[HostRef]
+
+class RecoveryLine(_Line):
+    value: Literal[0]
+    eventid: int; p_eventid: int; clock: int; ns: int = 0
+
+EventLine = Annotated[ProblemLine | RecoveryLine, Field(discriminator="value")]</code></pre>
+<ul class="explain">
+<li><b><code>extra="ignore"</code></b>: patch release อาจเพิ่ม field ใหม่ เราไม่ให้ระบบพังเพราะเรื่องนี้</li>
+<li><b>ทุก field มาจากไฟล์ใน <code>captured/</code></b> (ดู <code>docs/connector-payload.md</code>) ไม่มีตัวไหนมาจาก "เอกสารบอกว่า"</li>
+<li><b><code>value: int | float | str</code></b>: ใน payload จริง ค่าของ item แบบ float มาเป็น JSON integer ได้ (11 จาก 23 บรรทัดเป็น <code>0</code> ไม่ใช่ <code>0.0</code>) และ Pydantic โหมด smart จะเลือก type ที่ตรงที่สุด</li>
+<li><b>discriminator="value"</b>: problem กับ recovery มี<b>หน้าตาต่างกัน</b> Pydantic ดูค่า <code>value</code> (1 หรือ 0) แล้วเลือก model ให้ถูกตัว ถ้าเป็นค่าอื่นจะ error แล้วบรรทัดนั้นถูกข้าม</li>
+</ul>
+<pre><code>def parse_ndjson(body: bytes, adapter: TypeAdapter[T], *, kind: str) -> list[T]:
+    parsed: list[T] = []
+    for number, raw in enumerate(body.splitlines(), start=1):
+        if not raw.strip():
+            continue
+        try:
+            parsed.append(adapter.validate_python(json.loads(raw)))
+        except (ValueError, ValidationError) as exc:
+            log.warning("connector %s line %d skipped: %s | %.200r", kind, number, ...)
+    return parsed</code></pre>
+<ul class="explain">
+<li><b>parse ทีละบรรทัด</b> ถ้าบรรทัดไหนเสียก็ log แล้วข้าม <b>ไม่ทิ้งทั้ง batch</b></li>
+<li><code>json.JSONDecodeError</code> เป็นลูกของ <code>ValueError</code> จึงจับได้ใน except เดียว</li>
+<li><code>%.200r</code> ตัด log ไว้ที่ 200 ตัวอักษร กันบรรทัดยักษ์ท่วม log</li>
+</ul>
+
+<h4>ตรวจว่าผ่าน</h4>
+<pre>cd backend &amp;&amp; .venv/Scripts/python -m pytest tests/test_connector_schema.py -q
+# 8 passed</pre>
+<p>test ครอบ: parse fixture จริงครบทุกบรรทัด (values 20 ไฟล์ + probes), เห็น value_type 1–4, float ที่มาเป็น JSON integer, problem/recovery,
+บรรทัดเสียปนกับบรรทัดดี, field แปลกที่ไม่รู้จัก และ event value ที่ไม่รู้จัก</p>
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul><li>ตั้ง <code>value: float</code> แล้วเจอค่า text ทำให้ทั้งบรรทัด fail</li>
+<li>log type 2 มี field <code>eventid</code> ของ<b>บันทึก log</b> (เช่น Windows event log) ซึ่งไม่เกี่ยวกับ event stream อย่าเอามาปนกัน (schema ไม่ประกาศ field นี้ จึงถูก ignore)</li>
+<li>เขียน schema จากเอกสารแทน payload จริง</li></ul>
+
+<!-- ============================================================ -->
+<h2>6. ขั้น 1.3 — Mapper, adapter, connector ingest</h2>
+<div class="kv"><b>เป้าหมาย</b><span>จุดเดียวที่แปลระหว่างโลกของ engine กับ domain ของเรา</span>
+<b>ไฟล์</b><span><code>backend/app/zabbix/mapper.py</code>, <code>adapter.py</code>, <code>connector_ingest.py</code></span></div>
+
+<h3>mapper.py: ref ที่ opaque</h3>
+<pre><code>def device_ref(host: str) -> str:            return host
+def host_from_device_ref(ref: str) -> str:   return ref
+def problem_ref(eventid: int | str) -> str:  return f"P{int(eventid)}"
+def eventid_from_problem_ref(ref: str) -> int:
+    if not ref.startswith("P") or not ref[1:].isdigit():
+        raise ValueError(f"not a problem ref: {ref!r}")
+    return int(ref[1:])</code></pre>
+<ul class="explain">
+<li><b>ทำไม device_ref = ชื่อ host ไม่ใช่ hostid</b> (ADR 0006): payload ของ Connector <b>ไม่มี hostid</b> มีแต่ <code>host.host</code> ถ้าใช้ hostid ต้องยิง API 1 ครั้งต่อบรรทัด ซึ่งช้าและอยู่บนเส้นทางที่ร้อนที่สุด</li>
+<li>ฟังก์ชันคู่ "สร้าง/แกะ" อยู่ที่นี่ที่เดียว ถ้าวันหนึ่งเปลี่ยนรูปแบบ ref ก็แก้แค่ไฟล์นี้</li>
+</ul>
+
+<h3>mapper.py: เวลา และ severity</h3>
+<pre><code>def to_datetime(seconds: int, nanos: int = 0) -> datetime:
+    return datetime.fromtimestamp(seconds, tz=UTC) + timedelta(microseconds=nanos // 1000)
+
+_SEVERITY = {0: Severity.INFO, 1: Severity.INFO, 2: Severity.WARNING,
+             3: Severity.MINOR, 4: Severity.MAJOR, 5: Severity.CRITICAL}</code></pre>
+<ul class="explain">
+<li>engine ส่งเวลาเป็นคู่ (วินาที, นาโนวินาที) ส่วนเราเก็บเป็น <code>datetime</code> ตัวเดียวที่มี <code>tz=UTC</code> นาโนวินาทีถูกปัดเป็นไมโครวินาที เพราะ Python เก็บได้ละเอียดแค่นั้น</li>
+<li>severity ของ engine: 0 Not classified, 1 Information, 2 Warning, 3 Average, 4 High, 5 Disaster ค่าที่ไม่รู้จักจะกลายเป็น WARNING เพื่อไม่ให้ซ่อนปัญหา</li>
+</ul>
+
+<h3>mapper.py: device_from_api</h3>
+<pre><code>def _status(host) -> DeviceStatus:
+    if str(host.get("status")) == "1":              return DeviceStatus.DISABLED     # not monitored
+    if str(host.get("maintenance_status")) == "1":  return DeviceStatus.MAINTENANCE
+    states = {str(i.get("available")) for i in host.get("interfaces", [])}
+    if "1" in states: return DeviceStatus.UP        # available
+    if "2" in states: return DeviceStatus.DOWN      # unavailable
+    return DeviceStatus.UNKNOWN
+
+def device_from_api(host) -> Device:
+    tags = host.get("tags", [])
+    return Device(ref=device_ref(host["host"]), name=host.get("name") or host["host"],
+                  kind=_KIND.get(_tag(tags, "role"), DeviceKind.OTHER),
+                  site=_tag(tags, "site"), status=_status(host))</code></pre>
+<ul class="explain">
+<li><b>kind และ site มาจาก host tag</b> <code>role</code> และ <code>site</code> ซึ่ง provisioning (Phase 2) ต้องตั้งให้ทุก host ค่า role ที่รู้จักคือ <code>core</code>, <code>access</code>, <code>ap</code> และ <code>server</code></li>
+<li>ใน Zabbix 7.0 ค่า availability อยู่ที่ <b>interface</b> ไม่ได้อยู่ที่ host (ขึ้นกับ version ถ้าเปลี่ยนเวอร์ชันให้ตรวจด้วย <code>host.get</code> + <code>selectInterfaces</code>)</li>
+<li><b>ไม่อ่าน <code>lastvalue</code></b> ตาม ADR 0005 เพราะค่าล่าสุดมาจาก store ของเรา</li>
+</ul>
+
+<h3>adapter.py</h3>
+<pre><code>_HOST_QUERY = {"output": ["host", "name", "status", "maintenance_status"],
+               "selectInterfaces": ["available"], "selectTags": ["tag", "value"], "sortfield": "name"}
+
+class ZabbixAdapter:
+    async def _hosts(self, params, token):
+        try:
+            return await self._client.call("host.get", params, token=token)
+        except (ZabbixAPIError, httpx.HTTPError) as exc:
+            raise EngineUnavailable(str(exc)) from exc
+
+    async def list_devices(self, token: str) -> list[Device]:
+        return [mapper.device_from_api(h) for h in await self._hosts(_HOST_QUERY, token)]</code></pre>
+<ul class="explain">
+<li>implement <code>MonitoringEnginePort</code> โดย<b>ไม่ต้อง inherit</b> เพราะ Protocol ดูแค่ว่ามี method ครบ</li>
+<li>แปลง error ของ engine เป็น <code>EngineUnavailable</code> ฝั่ง api จึงไม่ต้องรู้จัก <code>ZabbixAPIError</code></li>
+<li>class นี้ไม่ถือ token ของตัวเองเลย token มาจากผู้เรียกทุกครั้ง</li>
+</ul>
+
+<h3>connector_ingest.py</h3>
+<pre><code>class ConnectorDecoder:
+    def decode_values(self, body: bytes) -> list[MetricPoint]:
+        points = (mapper.metric_from_value(line) for line in parse_values(body))
+        return [p for p in points if p is not None]      # เก็บเฉพาะค่าตัวเลข (type 0, 3)</code></pre>
+<p>ทำหน้าที่ "ต่อสาย" schema (ตรวจรูปแบบ) เข้ากับ mapper (แปลภาษา) เพื่อให้ <code>api/hooks.py</code> ได้แต่ object ของ domain ส่วน value แบบ text, char และ log ยังไม่ถือเป็น metric</p>
+
+<h4>ตรวจว่าผ่าน</h4>
+<pre>cd backend &amp;&amp; .venv/Scripts/python -m pytest tests/test_mapper_adapter.py -q
+# 24 passed</pre>
+<p>test ครอบ: ref แปลงไปแล้วกลับได้ (round-trip), ref เสียถูกปฏิเสธ, เวลาเป็น UTC aware, ตาราง severity, status ทุกกรณี,
+adapter ผ่าน <code>httpx.MockTransport</code> (ส่ง token ของผู้เรียกจริง และไม่ขอ <code>lastvalue</code>), decoder กับ fixture จริง</p>
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul><li>parse ref นอก mapper เช่น <code>ref[1:]</code> ใน services ซึ่งผิด §4</li>
+<li>ลืม <code>tz=UTC</code> ใน <code>fromtimestamp</code> ทำให้ได้เวลาเครื่อง (naive) แล้วถูก <code>__post_init__</code> ปฏิเสธ</li>
+<li>เปลี่ยนชื่อ host ใน engine แล้วกราฟเก่าหาย ไม่ใช่บั๊ก เป็นผลของ ADR 0006 (ชื่อ host = ID ถาวร)</li></ul>
+
+<!-- ============================================================ -->
+<h2>7. ขั้น 1.4 — Store ของเราเอง</h2>
+<div class="kv"><b>เป้าหมาย</b><span>ที่เก็บ time-series, latest value, problem และบัญชี portal ที่ทุกกราฟและ tile อ่าน</span>
+<b>ไฟล์</b><span><code>backend/app/store/sqlite_store.py</code> (test/demo), <code>postgres_store.py</code> (appliance), <code>backend/app/crypto.py</code>, <code>ops/init-store.sh</code></span></div>
+
+<h3>Tables (เหมือนกันทั้ง 2 implementation)</h3>
+<table>
+<tr><th>Table</th><th>Key</th><th>ใช้ทำอะไร</th></tr>
+<tr><td><code>metric_points</code></td><td>(device_ref, metric, ts)</td><td>กราฟ ใน Postgres เป็น <b>hypertable</b></td></tr>
+<tr><td><code>latest_values</code></td><td>(device_ref, metric)</td><td>tile "ค่าล่าสุด" (ADR 0005)</td></tr>
+<tr><td><code>problems</code></td><td>ref</td><td>รายการปัญหา และสถานะ resolved</td></tr>
+<tr><td><code>tenants</code></td><td>id</td><td>ลูกค้า + read token <b>ที่เข้ารหัสแล้ว</b></td></tr>
+<tr><td><code>users</code></td><td>username</td><td>user ของ portal + password hash</td></tr>
+</table>
+<p>ใน plan ระบุ table <code>devices</code> ไว้ด้วย แต่ผมไม่ได้ทำ เพราะรายชื่ออุปกรณ์มาจาก engine port (มี cache) ถ้าเก็บซ้ำในเรามีโอกาสที่ข้อมูลสองที่จะไม่ตรงกัน</p>
+
+<h3>Upsert: เพราะ Connector อาจส่งซ้ำ</h3>
+<pre><code>INSERT INTO metric_points VALUES ($1,$2,$3,$4)
+ON CONFLICT (device_ref, metric, ts) DO UPDATE SET value = excluded.value;
+
+INSERT INTO latest_values VALUES ($1,$2,$3,$4)
+ON CONFLICT (device_ref, metric) DO UPDATE
+SET ts = excluded.ts, value = excluded.value
+WHERE excluded.ts &gt;= latest_values.ts;      -- batch เก่าที่มาช้า ห้ามทับค่าใหม่</code></pre>
+<ul class="explain">
+<li>ส่ง batch เดิมซ้ำ 2–3 รอบ ข้อมูลก็ไม่ซ้ำ (เรียกว่า <b>idempotent</b>) เราจึงตั้ง Connector ให้ retry ได้ 3 ครั้งอย่างปลอดภัย</li>
+<li><code>WHERE excluded.ts &gt;= latest_values.ts</code> ทำให้ "ค่าล่าสุด" <b>เดินหน้าอย่างเดียว</b></li>
+<li>problem ใช้ <code>ON CONFLICT (ref) DO NOTHING</code> ส่วน resolve ใช้ <code>UPDATE … WHERE resolved_at IS NULL</code></li>
+</ul>
+
+<h3>Downsampling ทำใน store</h3>
+<pre><code>-- Postgres + TimescaleDB
+SELECT time_bucket($1::interval, ts) AS bucket, avg(value) FROM metric_points
+WHERE device_ref = $2 AND metric = $3 AND ts &gt;= $4 AND ts &lt; $5
+GROUP BY bucket ORDER BY bucket;
+
+-- SQLite (ผลเหมือนกัน)
+SELECT CAST(ts / :step AS INTEGER) * :step AS bucket, AVG(value) ... GROUP BY bucket</code></pre>
+
+<h3>Postgres: schema ตอน start + กันชนกัน</h3>
+<pre><code>async with self._db.acquire() as conn, conn.transaction():
+    await conn.execute("SELECT pg_advisory_xact_lock($1)", _SCHEMA_LOCK)
+    await conn.execute(_SCHEMA)        # CREATE TABLE IF NOT EXISTS ... + create_hypertable(...)
+    await conn.execute("SELECT add_retention_policy('metric_points', $1::interval, if_not_exists => TRUE)", ...)</code></pre>
+<div class="note"><b>บั๊กจริงที่เจอระหว่างทำ:</b> พอ uvicorn รัน 2 worker ทั้งสองตัวรัน <code>CREATE TABLE IF NOT EXISTS</code> พร้อมกัน แล้ว Postgres ตอบ
+<code>UniqueViolationError: duplicate key value violates unique constraint "pg_type_typname_nsp_index"</code> (คำว่า "IF NOT EXISTS" ไม่ได้กัน race)
+ทางแก้คือ <b>advisory lock</b> ภายใน transaction ซึ่งบังคับให้ทีละ worker บั๊กแบบนี้ unit test จับไม่ได้ ต้องเจอตอนรันจริง</div>
+
+<h3>SQLite: async โดยไม่บล็อก event loop</h3>
+<pre><code>async def _run(self, fn):
+    async with self._lock:
+        return await asyncio.to_thread(fn, self._db)</code></pre>
+<p><code>sqlite3</code> ใน stdlib เป็นแบบ sync เราจึงโยนงานไปทำใน thread และใช้ lock กันไม่ให้ 2 thread ใช้ connection เดียวกันพร้อมกัน</p>
+
+<h3>crypto.py: tenant token เข้ารหัสใน DB</h3>
+<pre><code>class TokenCipher:
+    def __init__(self, key: str) -> None:  self._fernet = Fernet(key.encode())
+    def encrypt(self, plaintext: str) -> str: return self._fernet.encrypt(plaintext.encode()).decode()
+    def decrypt(self, ciphertext: str) -> str: return self._fernet.decrypt(ciphertext.encode()).decode()</code></pre>
+<p>Fernet คือ AES-128-CBC + HMAC-SHA256 key มาจาก <code>TOKEN_KEY</code> ใน env ถ้า DB หลุดออกไป token ก็ยังอ่านไม่ได้ถ้าไม่มี key</p>
+
+<h3>ops/init-store.sh: สร้าง DB ของเราแยกจาก engine</h3>
+<pre><code>SELECT 'CREATE ROLE acme_app LOGIN' WHERE NOT EXISTS (...)\gexec
+ALTER ROLE acme_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'pw';
+SELECT 'CREATE DATABASE acme OWNER acme_app' WHERE NOT EXISTS (...)\gexec
+CREATE EXTENSION IF NOT EXISTS timescaledb;              -- ใน acme, โดย admin
+REVOKE CONNECT ON DATABASE zabbix FROM PUBLIC;           -- ปิดประตู DB ของ engine</code></pre>
+<ul class="explain">
+<li><code>\gexec</code> คือรันผลลัพธ์ของ SELECT เป็นคำสั่ง ใช้ทำ "สร้างถ้ายังไม่มี" เพราะ Postgres ไม่มี <code>CREATE DATABASE IF NOT EXISTS</code></li>
+<li>รหัสผ่านส่งผ่าน <b>psql variable บน stdin</b> (<code>:'pw'</code>) จึงไม่โผล่ใน process list</li>
+<li><b>REVOKE CONNECT</b> คือหัวใจของ §3 เพราะโดยปกติ PUBLIC (ทุก role) connect ได้ทุก DB ถ้าไม่ revoke ตัว <code>acme_app</code> ก็เข้า DB ของ engine ได้</li>
+</ul>
+
+<h4>ตรวจว่าผ่าน</h4>
+<pre>ACME_DB_PASSWORD=$(grep '^ACME_DB_PASSWORD=' backend/.env | cut -d= -f2- | tr -d '\r') bash ops/init-store.sh --test-db
+# init-store: role acme_app, database(s) acme acme_test ready; CONNECT on zabbix revoked from PUBLIC
+
+docker compose -f engine/docker-compose.yml exec -T db psql -U acme_app -d zabbix -c "select 1"
+# FATAL:  permission denied for database "zabbix"
+# DETAIL:  User does not have CONNECT privilege.
+
+docker compose -f engine/docker-compose.yml exec -T db psql -U acme_app -d acme \
+  -tAc "select proc_name, config from timescaledb_information.jobs where hypertable_name='metric_points'"
+# policy_retention|{"drop_after": "30 days", "hypertable_id": 1}
+
+cd backend &amp;&amp; .venv/Scripts/python -m pytest tests/test_store.py -q     # SQLite: 8 passed, 8 skipped (Postgres)
+# Postgres (รันใน container เพราะ DB ไม่เปิด port ออกนอก network):
+PW=$(grep '^ACME_DB_PASSWORD=' backend/.env | cut -d= -f2- | tr -d '\r')
+MSYS_NO_PATHCONV=1 docker compose -f backend/docker-compose.dev.yml run --rm --no-deps \
+  -v "$(pwd -W)/backend/tests:/srv/tests:ro" \
+  -e TEST_POSTGRES_DSN="postgresql://acme_app:${PW}@db:5432/acme_test" \
+  backend python -m pytest tests/test_store.py -q -p no:cacheprovider
+# 16 passed</pre>
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul><li>ใช้ user <code>zabbix</code> กับ store ของเรา แบบนี้ไม่มีการแยกกันจริง</li>
+<li>ไม่มี unique key ทำให้ข้อมูลซ้ำทุกครั้งที่ Connector retry</li>
+<li>ลืม <code>MSYS_NO_PATHCONV=1</code> และ <code>pwd -W</code> ใน Git Bash ทำให้ mount ได้โฟลเดอร์ว่าง</li>
+<li>ชี้ <code>TEST_POSTGRES_DSN</code> ไปที่ <code>acme</code> (DB จริง) เพราะ test จะ <code>TRUNCATE</code> ทุก table ต้องใช้ <code>acme_test</code> เท่านั้น</li></ul>
+
+<!-- ============================================================ -->
+<h2>8. ขั้น 1.5 — <code>api/hooks.py</code>: ตัวรับ push จริง</h2>
+<div class="kv"><b>เป้าหมาย</b><span>แทน <code>lab/ndjson-sink/sink.py</code> ด้วย endpoint ของ backend</span>
+<b>ไฟล์</b><span><code>backend/app/api/hooks.py</code>, <code>backend/app/services/ingest.py</code></span></div>
+
+<h3>hooks.py: ทำหน้าที่ขนส่งอย่างเดียว</h3>
+<pre><code>def _check_token(request, expected):
+    given = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(given.encode(), f"Bearer {expected}".encode()):
+        raise HTTPException(401, "bad token")
+
+@router.post("/values")
+async def push_values(request: Request, container: ContainerDep) -> dict[str, int]:
+    _check_token(request, container.settings.push_token)
+    body = await request.body()
+    try:
+        stored = await container.ingest.values(body)
+    except Exception as exc:
+        raise HTTPException(503, "store unavailable") from exc
+    return {"stored": stored}</code></pre>
+<ul class="explain">
+<li><b><code>hmac.compare_digest</code></b> ใช้เวลาเท่ากันไม่ว่า token จะผิดตรงตัวไหน คนนอกจึงเดา token จากเวลาตอบไม่ได้ (timing attack)</li>
+<li><b>ไม่มี schema และไม่มีคำว่า engine ในไฟล์นี้</b> ตัว decoder ถูกส่งเข้ามาผ่าน container ตามที่ plan กำหนด</li>
+<li><b>status code ออกแบบให้เข้ากับการ retry ของผู้ส่ง:</b> 200 = เก็บแล้ว, 401 = config ผิด (retry ไปก็ไม่ช่วย), 503 = store มีปัญหา (retry ได้ เพราะเขียนแบบ idempotent)</li>
+</ul>
+
+<h3>services/ingest.py: เก็บก่อน แล้วค่อยประกาศ</h3>
+<pre><code>async def values(self, body: bytes) -> int:
+    points = self._decoder.decode_values(body)
+    await self._store.write_metrics(points)          # 1) เก็บก่อน
+    for device_ref, device_points in by_device.items():
+        await self._bus.publish({"type": "metrics", "device_ref": device_ref, "points": [...]})  # 2) ค่อยประกาศ
+
+async def events(self, body: bytes) -> int:
+    for item in self._decoder.decode_events(body):
+        if isinstance(item, Problem):
+            await self._store.open_problem(item); changed = item
+        else:
+            changed = await self._store.resolve_problem(item)
+            if changed is None:
+                log.warning("resolution for unknown problem %s ignored", item.problem_ref); continue
+        await self._bus.publish({"type": "problem", "device_ref": changed.device_ref, "problem": problem_view(changed)})</code></pre>
+<ul class="explain">
+<li><b>ลำดับสำคัญ:</b> ถ้าเก็บไม่สำเร็จ request จะ fail แล้วผู้ส่ง retry และจะไม่มีใครเห็นข้อมูลที่ไม่เคยถูกบันทึก</li>
+<li>recovery ไม่มีชื่อหรือ host มาด้วย จึงต้องให้ store หา problem เดิมก่อนแล้วคืนมา เราถึงรู้ว่าต้องส่ง SSE ไปที่อุปกรณ์ตัวไหน</li>
+<li>ถ้า recovery มาโดยไม่เคยเห็น problem (เช่น problem เกิดก่อนเราเริ่มฟัง) ระบบจะ log แล้วข้าม ไม่ crash</li>
+</ul>
+
+<h3>ย้าย Connector จาก sink มาที่ backend</h3>
+<pre>ENGINE_TOKEN=$(grep '^ENGINE_TOKEN=' backend/.env | cut -d= -f2 | tr -d '\r')
+PUSH_TOKEN=$(grep '^PUSH_TOKEN=' backend/.env | cut -d= -f2 | tr -d '\r')
+api() { curl -s -X POST http://127.0.0.1:8080/api_jsonrpc.php -H 'Content-Type: application/json-rpc' \
+          -H "Authorization: Bearer $ENGINE_TOKEN" -d "$1"; echo; }
+api '{"jsonrpc":"2.0","method":"connector.update","id":1,"params":[
+ {"connectorid":"1","name":"acme-values","url":"http://backend:8000/hooks/values","token":"'"$PUSH_TOKEN"'","max_attempts":3},
+ {"connectorid":"2","name":"acme-events","url":"http://backend:8000/hooks/events","token":"'"$PUSH_TOKEN"'","max_attempts":3},
+ {"connectorid":"3","status":0}]}'
+docker compose -f engine/docker-compose.yml exec -T zabbix-server zabbix_server -R config_cache_reload
+# {"jsonrpc":"2.0","result":{"connectorids":["1","2","3"]},"id":1}</pre>
+<div class="note"><b>ขึ้นกับ version:</b> <code>connectorid</code> 1, 2, 3 เป็นค่าบนเครื่องนี้ ให้เช็คของตัวเองก่อนด้วย <code>connector.get</code> ส่วน <code>status</code> 0 = disabled และ 1 = enabled (สำหรับ connector), <code>max_attempts</code> รับค่า 1–5 (ค่าที่อ้างอิง Zabbix 7.0.29)</div>
+
+<h4>ตรวจว่าผ่าน</h4>
+<pre>docker logs NetWatch-backend 2>&amp;1 | grep "values batch" | tail -2
+# INFO app.api.hooks: values batch: 247 bytes, 1 points stored
+# INFO app.api.hooks: values batch: 542 bytes, 2 points stored
+cd backend &amp;&amp; .venv/Scripts/python -m pytest tests/test_api.py -q -k "push or problem or retried or bad_lines"</pre>
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul><li>ใช้ URL <code>http://localhost:8000</code> ซึ่งจากใน container ของ server แปลว่าตัว server เอง ต้องใช้ชื่อ service <code>backend</code></li>
+<li>backend ไม่ได้อยู่ใน network <code>netwatch-engine</code> ทำให้ log ของ server ขึ้น <code>Couldn't resolve host</code></li>
+<li>ตอบ 200 ทั้งที่ store เขียนไม่สำเร็จ ข้อมูลจะหายเงียบๆ</li></ul>
+
+<!-- ============================================================ -->
+<h2>9. ขั้น 1.6 — Read services + API endpoints</h2>
+<div class="kv"><b>เป้าหมาย</b><span>REST API ให้ portal: รายชื่ออุปกรณ์มาจาก engine port (มี cache) ส่วนตัวเลขทุกตัวมาจาก store</span>
+<b>ไฟล์</b><span><code>backend/app/services/inventory.py, metrics.py, problems.py, views.py</code>, <code>backend/app/api/devices.py, problems.py, deps.py</code></span></div>
+
+<h3>Endpoints</h3>
+<table>
+<tr><th>Method + path</th><th>ข้อมูลมาจาก</th><th>หมายเหตุ</th></tr>
+<tr><td><code>GET /api/devices</code></td><td>engine port (cache 60 s)</td><td>ใช้ token ของ tenant</td></tr>
+<tr><td><code>GET /api/devices/{ref}</code></td><td>รายการข้างบน</td><td>404 ทั้งกรณี "ไม่มี" และ "ไม่ใช่ของคุณ"</td></tr>
+<tr><td><code>GET /api/devices/{ref}/latest</code></td><td>store <code>latest_values</code></td><td>tile ของอุปกรณ์</td></tr>
+<tr><td><code>GET /api/devices/{ref}/metrics?metric=&amp;from=&amp;to=&amp;step=</code></td><td>store <code>metric_points</code></td><td>ไม่ส่ง metric = ทุก metric</td></tr>
+<tr><td><code>GET /api/latest</code></td><td>store</td><td>tile ของหน้า overview</td></tr>
+<tr><td><code>GET /api/problems?active=&amp;device=&amp;limit=</code></td><td>store <code>problems</code></td><td>เรียงตาม active → severity → เวลา</td></tr>
+</table>
+
+<h3>inventory.py: รายชื่ออุปกรณ์ = ตัวกรองของทุกอย่าง</h3>
+<pre><code>async def devices(self, tenant: Tenant) -> list[Device]:
+    key = f"devices:{token_scope(tenant.engine_token)}"
+    cached = await self._cache.get(key)
+    if cached is not None:
+        return [device_from_view(v) for v in cached]
+    devices = await self._engine.list_devices(tenant.engine_token)
+    await self._cache.set(key, [device_view(d) for d in devices], self._ttl)
+    return devices
+
+async def device(self, tenant, ref) -> Device:
+    for d in await self.devices(tenant):
+        if d.ref == ref: return d
+    raise DeviceNotFound(ref)</code></pre>
+<ul class="explain">
+<li><b>สิทธิ์ของ engine คุ้มครองแค่ทาง API</b> ไม่ครอบคลุม store ของเรา ดังนั้นทุกการอ่านจาก store ต้องกรองด้วยชุด <code>device_ref</code> ของ tenant (ที่ได้จาก token ของ tenant) เสมอ</li>
+<li><b>cache key รวม hash ของ token</b> (<code>token_scope</code> = sha256 ตัดเหลือ 16 ตัว) กันคำตอบของ tenant A ไปโผล่ที่ tenant B และ token จริงไม่อยู่ใน key</li>
+<li>ตอบ 404 เหมือนกันทั้ง "ไม่มี" และ "ไม่ใช่ของคุณ" คนนอกจะได้เดาไม่ได้ว่ามีอุปกรณ์อะไรอยู่บ้าง</li>
+</ul>
+
+<h3>metrics.py: จำกัดจำนวนจุด</h3>
+<pre><code>MAX_POINTS = 2000; DEFAULT_POINTS = 300; MIN_STEP_SECONDS = 60
+
+def choose_step(start, end, requested):
+    span = (end - start).total_seconds()
+    floor = max(MIN_STEP_SECONDS, math.ceil(span / MAX_POINTS))
+    if requested is None:
+        return max(floor, math.ceil(span / DEFAULT_POINTS))
+    return max(floor, requested)</code></pre>
+<p>กราฟไม่ต้องการจุดมากกว่าจำนวน pixel ถ้า client ขอ step เล็กเกินไป เราจะขยายให้เอง และตอบ <code>step</code> ที่ใช้จริงกลับไปด้วย</p>
+<p><code>api/devices.py</code> ปฏิเสธเวลาที่ไม่มี timezone (<code>from=2026-10-07T00:00:00</code> → 400) ต้องส่งแบบ <code>2026-10-09T10:00:00+07:00</code></p>
+
+<h4>ตรวจว่าผ่าน (ตาม plan: เรียก /metrics แล้ว engine ต้องไม่ได้ request)</h4>
+<pre>B=$(docker logs NetWatch-web 2>&amp;1 | grep -c api_jsonrpc)
+for i in $(seq 10); do
+  curl -s -o /dev/null "http://127.0.0.1:8000/api/devices/Zabbix%20server/metrics" -H "Authorization: Bearer $SESSION"
+  curl -s -o /dev/null "http://127.0.0.1:8000/api/latest" -H "Authorization: Bearer $SESSION"
+done
+A=$(docker logs NetWatch-web 2>&amp;1 | grep -c api_jsonrpc); echo $((A-B))
+# 0
+curl -s "http://127.0.0.1:8000/api/devices/Zabbix%20server/metrics?metric=Lab%20event%20probe&amp;step=60" -H "Authorization: Bearer $SESSION"
+# {"device_ref":"Zabbix server","step":60,"series":{"Lab event probe":[{"ts":"2026-10-08T18:22:00+00:00","value":1.0},
+#   {"ts":"2026-10-08T18:23:00+00:00","value":0.0}]}}</pre>
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul><li>อ่าน store โดยไม่กรองตาม tenant ซึ่งเป็นช่องโหว่ข้ามลูกค้าที่ร้ายแรงที่สุดของระบบนี้</li>
+<li>ใส่ token ตรงๆ ใน cache key ทำให้ token โผล่ใน Redis</li>
+<li>ref ที่มีช่องว่าง (<code>Zabbix server</code>) ต้อง encode ใน URL เป็น <code>%20</code> (portal ใช้ <code>encodeURIComponent</code>)</li></ul>
+
+<!-- ============================================================ -->
+<h2>10. ขั้น 1.7 — Multi-tenant และ auth</h2>
+<div class="kv"><b>เป้าหมาย</b><span>user → tenant → read token ของ tenant โดย tenant A ต้องไม่เห็นข้อมูลของ B</span>
+<b>ไฟล์</b><span><code>backend/app/auth/passwords.py, sessions.py, service.py, cli.py</code>, <code>backend/app/api/auth.py, deps.py</code>, <code>backend/app/zabbix/lab_tenant.py</code></span></div>
+
+<p><b>Decision ที่ปิดในขั้นนี้ (ADR 0008):</b> login ด้วย username + password แล้วได้ <b>session token ที่ลงลายเซ็น HMAC</b> ในรูป
+cookie แบบ HttpOnly (หรือส่งเป็น Bearer สำหรับ script) ยังไม่มี SSO</p>
+
+<h3>passwords.py: scrypt จาก stdlib</h3>
+<pre><code>def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    return f"scrypt${n}${r}${p}${salt.hex()}${digest.hex()}"</code></pre>
+<ul class="explain"><li>scrypt ตั้งใจให้ <b>ช้าและกินหน่วยความจำ</b> การเดารหัสจำนวนมากจึงแพง ส่วน salt ทำให้รหัสเดียวกันได้ hash ต่างกัน</li>
+<li>เก็บพารามิเตอร์ไว้ใน hash ทำให้วันหน้าเพิ่มความแรงได้โดย hash เก่ายังใช้ได้</li></ul>
+
+<h3>sessions.py: token ลงลายเซ็น</h3>
+<pre><code>payload   = base64url(JSON {"u": username, "t": tenant_id, "exp": unix_seconds})
+signature = base64url(HMAC-SHA256(SESSION_SECRET, payload))
+token     = payload + "." + signature
+
+def verify(self, token):
+    payload, sep, signature = token.partition(".")
+    if not sep or not hmac.compare_digest(signature, self._sign(payload)): return None
+    ... ถ้าหมดอายุ → None</code></pre>
+<ul class="explain"><li><b>stateless:</b> ทุก worker ตรวจ token ได้เองโดยไม่ต้องมี session store ร่วมกัน</li>
+<li>token <b>อ่านได้ แต่ปลอมไม่ได้</b> จึงไม่ใส่ความลับไว้ข้างใน (read token ของ tenant อยู่ใน DB)</li>
+<li>ใช้ cookie เพราะ <code>EventSource</code> (SSE ใน browser) <b>ตั้ง header เองไม่ได้</b> แต่ cookie ถูกส่งไปอัตโนมัติ</li></ul>
+
+<h3>service.py</h3>
+<pre><code>async def login(self, username, password) -> str | None:
+    user = await self._store.get_user(username)
+    if user is None:
+        verify_password(password, _DUMMY_HASH)   # ให้ใช้เวลาเท่ากับกรณีรหัสผิด
+        return None
+    ...
+async def tenant_for(self, token) -> Tenant | None:
+    session = self._signer.verify(token)
+    user = await self._store.get_user(session.username)    # อ่าน user ใหม่ทุกครั้ง
+    if user is None or user.tenant_id != session.tenant_id: return None
+    return await self._store.get_tenant(user.tenant_id)</code></pre>
+<ul class="explain"><li>"ไม่มี user" กับ "รหัสผิด" ตอบเหมือนกันและใช้เวลาเท่ากัน คนนอกจึงเดาไม่ได้ว่ามี username อะไรบ้าง</li>
+<li>อ่าน user ใหม่ทุก request ทำให้ลบหรือย้าย user แล้วมีผลทันที ไม่ต้องรอ token หมดอายุ</li></ul>
+
+<h3>สร้าง tenant ทดลอง และ user</h3>
+<p><code>provisioning/provision.py</code> จะมาใน Phase 2 ระหว่างนี้ใช้ <code>app/zabbix/lab_tenant.py</code> ซึ่งสร้างใน engine ได้แก่ user group ที่<b>อ่านได้อย่างเดียว</b> ใน host group "Zabbix servers",
+user และ API token จากนั้นรัน check ตาม ADR 0004 แล้วบันทึก tenant <code>lab</code> ลง store (token ถูกเข้ารหัสและไม่ถูก print)</p>
+<pre>ENGINE_TOKEN=$(grep '^ENGINE_TOKEN=' backend/.env | cut -d= -f2 | tr -d '\r')
+docker compose -f backend/docker-compose.dev.yml exec -T -e ENGINE_TOKEN="$ENGINE_TOKEN" backend python -m app.zabbix.lab_tenant
+# ADR 0004 check, tenant lab: PASS (sees ['Zabbix server'], expected ['Zabbix server'])
+# tenant 'lab' saved in our store (token encrypted; not printed)
+
+docker compose -f backend/docker-compose.dev.yml exec backend python -m app.auth.cli add-user labuser lab
+# password for labuser:   (พิมพ์ซ่อน อย่างน้อย 12 ตัว)
+# again:
+# user labuser saved in tenant lab</pre>
+<div class="note"><b>ขึ้นกับ version:</b> <code>usergroup.create</code> ใช้ <code>hostgroup_rights</code> (Zabbix 7.0) และ <code>roleid "1"</code> คือ role "User role" ที่ติดมากับระบบ ให้ตรวจด้วย <code>role.get</code> ก่อนใช้กับ instance อื่น</div>
+
+<h4>ตรวจว่าผ่าน</h4>
+<pre>curl -s -X POST http://127.0.0.1:8000/api/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"labuser","password":"..."}'                  # {"token":"..."}
+curl -s http://127.0.0.1:8000/api/auth/me -H "Authorization: Bearer $SESSION"
+# {"tenant_id":"lab","tenant_name":"Lab tenant"}
+curl -s http://127.0.0.1:8000/api/devices -H "Authorization: Bearer $SESSION"
+# [{"ref":"Zabbix server","name":"Zabbix server","kind":"other","site":"","status":"down"}]</pre>
+<p><code>status: down</code> ถูกต้องแล้ว เพราะ host "Zabbix server" มี agent interface ที่ติดต่อไม่ได้จริง (ใน lab ไม่มี agent รันอยู่)
+test <code>test_tenants_see_only_their_own_devices</code> และ <code>test_tenant_cannot_read_another_tenants_data</code> ยืนยันว่า tenant B อ่านอุปกรณ์ของ A ไม่ได้เลยทุกช่องทาง (404 หรือรายการว่าง)</p>
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul><li>ใช้ admin token ใน read path ซึ่งผิด ADR 0004 (container ของ backend ตั้ง <code>ENGINE_TOKEN: ""</code> ไว้กันพลาด)</li>
+<li>ส่ง password หรือ token เป็น argument บน command line ทำให้ค้างใน shell history (CLI ใช้ <code>getpass</code> แทน)</li>
+<li>บอก client ว่า "ไม่มี user นี้" ต่างจาก "รหัสผิด"</li></ul>
+
+<!-- ============================================================ -->
+<h2>11. ขั้น 1.8 — Live updates: bus, SSE, cache</h2>
+<div class="kv"><b>เป้าหมาย</b><span>เกิดปัญหาแล้วหน้าเว็บรู้ทันที แม้ request push กับ SSE จะอยู่คนละ uvicorn worker</span>
+<b>ไฟล์</b><span><code>backend/app/bus/memory.py, redis_bus.py</code>, <code>backend/app/services/stream.py</code>, <code>backend/app/api/stream.py</code>, <code>backend/app/cache.py</code></span></div>
+
+<h3>ทำไมต้องมี Redis</h3>
+<pre>             worker #1                         worker #2
+  POST /hooks/events ──► ingest ──publish──►  Redis channel "acme:live" ──► subscribe ──► SSE ──► browser
+</pre>
+<p>bus แบบ memory ส่งได้แค่ใน worker เดียวกัน ถ้า push เข้า worker #1 แต่ browser ต่ออยู่กับ worker #2 ข้อความจะไม่ถึง
+Dockerfile จึงตั้ง <code>--workers 2</code> <b>โดยตั้งใจ</b> เพื่อให้การทดสอบพิสูจน์เส้นทางผ่าน Redis จริง</p>
+
+<h3>bus/memory.py: queue มีขนาดจำกัด</h3>
+<pre><code>async def publish(self, message):
+    for queue in self._subscribers:
+        try: queue.put_nowait(message)
+        except asyncio.QueueFull: log.warning("bus subscriber is full; message dropped")</code></pre>
+<p>browser ที่ค้าง (ไม่อ่าน) จะทำข้อความหาย แทนที่จะทำให้ memory โตไม่จำกัด เมื่อ reconnect แล้ว portal ค่อยอ่านสถานะใหม่จาก REST</p>
+
+<h3>services/stream.py: กรองตาม tenant + heartbeat</h3>
+<pre><code>async with self._bus.subscribe() as messages:
+    while True:
+        if pending is None:
+            pending = asyncio.ensure_future(anext(messages))
+        done, _ = await asyncio.wait({pending}, timeout=self._heartbeat)
+        if not done:
+            yield HEARTBEAT; continue
+        message, pending = pending.result(), None
+        if message.get("device_ref") in refs:
+            yield message</code></pre>
+<ul class="explain"><li>bus มีข้อความของ<b>ทุก tenant</b> ตรงนี้คือจุดที่แต่ละ connection ได้เฉพาะของตัวเอง</li>
+<li>ถ้าไม่มีข้อความ 15 วินาทีจะส่ง heartbeat เพื่อกัน proxy ตัด connection ที่เงียบ และให้ browser รู้เมื่อ connection ตาย</li>
+<li>ใช้ <code>asyncio.wait</code> กับ task ที่ค้างไว้ แทน <code>wait_for</code> เพราะ <code>wait_for</code> จะ cancel การอ่านทุกครั้งที่ timeout และอาจทำข้อความหาย</li>
+<li>รายชื่ออุปกรณ์ถูก refresh ทุก 60 วินาที อุปกรณ์ใหม่จึงเริ่ม stream ได้โดยไม่ต้อง reconnect</li></ul>
+
+<h3>api/stream.py: รูปแบบ SSE</h3>
+<pre>: connected
+
+event: problem
+data: {"type": "problem", "device_ref": "Zabbix server", "problem": {"ref": "P22", ..., "active": true}}
+
+: heartbeat</pre>
+<p>บรรทัดที่ขึ้นต้นด้วย <code>:</code> คือ comment ซึ่ง EventSource จะไม่สนใจ header <code>X-Accel-Buffering: no</code> บอก nginx ใน Phase 4 ว่าไม่ต้อง buffer</p>
+
+<h4>ตรวจว่าผ่าน: เงื่อนไขปิด phase</h4>
+<pre># terminal 1: เปิด stream ค้างไว้
+curl -N http://127.0.0.1:8000/api/stream -H "Authorization: Bearer $SESSION"
+
+# terminal 2: push probe = 1 (item lab.event.probe, id 50740 บนเครื่องนี้)
+curl -s -X POST http://127.0.0.1:8080/api_jsonrpc.php -H 'Content-Type: application/json-rpc' \
+  -H "Authorization: Bearer $ENGINE_TOKEN" \
+  -d '{"jsonrpc":"2.0","method":"history.push","params":[{"itemid":"50740","value":"1"}],"id":4}'
+
+# ผลจริง: push 18:22:48 → terminal 1 ได้ภายใน 3 วินาที
+# event: problem
+# data: {"type": "problem", ..., "ref": "P22", "severity": "warning", "title": "Lab: event probe is 1", "active": true}
+# push value "0" → ได้ข้อความที่สอง "active": false, "resolved_at": "2026-10-08T18:23:01.691172+00:00"</pre>
+<div class="note"><code>history.push</code> ตรงนี้คือคำสั่งที่ <b>เรา</b>ใช้ <b>ส่งค่าเข้า</b> engine เพื่อจำลองเหตุการณ์ ไม่ใช่การ<b>อ่าน</b> history และไม่มีอยู่ในโค้ดของ backend</div>
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul><li>ใช้ memory bus กับหลาย worker แล้ว SSE ได้ข้อความบ้างไม่ได้บ้าง (ขึ้นกับว่า request ตกไป worker ไหน)</li>
+<li>ลืมกรอง tenant ใน stream ทำให้ลูกค้าเห็น event ของลูกค้าอื่น</li>
+<li>proxy buffer SSE ทำให้ข้อความมาเป็นก้อนทีละหลายนาที</li></ul>
+
+<!-- ============================================================ -->
+<h2>12. ขั้น 1.9 — Wiring และ test</h2>
+<div class="kv"><b>เป้าหมาย</b><span>ต่อทุกกล่องเข้าด้วยกันในจุดเดียว เปิดเซิร์ฟเวอร์ และมี test ครอบทุกขั้น</span>
+<b>ไฟล์</b><span><code>backend/app/container.py</code>, <code>main.py</code>, <code>config.py</code>, <code>backend/Dockerfile</code>, <code>backend/docker-compose.dev.yml</code>, <code>backend/tests/*</code></span></div>
+
+<h3>container.py: จุดเดียวที่เลือกของจริง</h3>
+<pre><code>def build_container(settings, *, engine=None, store=None) -> Container:
+    client = None
+    if engine is None:
+        client = ZabbixClient(settings.engine_url)
+        engine = ZabbixAdapter(client)
+    store = store or build_store(settings)          # sqlite:/// หรือ postgresql://
+    bus, cache = (RedisBus(url), RedisCache(url)) if settings.redis_url else (MemoryBus(), MemoryCache())
+    ...
+    return Container(..., ingest=IngestService(decoder, store, bus), inventory=..., metrics=..., auth=...)</code></pre>
+<ul class="explain"><li>เป็น 1 ใน 2 ที่ที่ได้รับยกเว้นจากกฎ boundary <b>เพราะ</b> มันต้องเลือก class จริงมาเสียบเข้ากับ port</li>
+<li>ส่วนอื่นรับ <code>Container</code> ไปใช้ โดยไม่มีใคร import implementation เองเลย</li>
+<li>test ส่ง <code>engine=FakeEngine()</code> และ <code>store=SqliteStore(...)</code> เข้ามาแทนได้ โดยที่ services, api และ auth ยังเป็นของจริงทั้งหมด</li></ul>
+
+<h3>main.py</h3>
+<ul class="explain"><li>อ่าน settings ตอน <b>start</b> (lifespan) ไม่ใช่ตอน import ทำให้ test สร้าง app รอบ container ของตัวเองได้</li>
+<li><code>DeviceNotFound</code> → 404, <code>EngineUnavailable</code> → 502 พร้อมข้อความ "monitoring backend unavailable" (ไม่บอกชื่อ engine)</li>
+<li>serve portal จาก <code>FRONTEND_DIST</code> ถ้ามี (Phase 3) โดย path ที่ไม่ใช่ไฟล์จะได้ <code>index.html</code> (SPA) และกัน path traversal ด้วย <code>is_relative_to</code></li></ul>
+
+<h3>Dockerfile + docker-compose.dev.yml</h3>
+<ul class="explain"><li>base image <code>python:3.12.11-slim</code> (official) ลง dependency ก่อน copy โค้ด แก้โค้ดแล้ว build ใหม่จึงไม่ต้องลง dependency ซ้ำ</li>
+<li>รันเป็น user <code>acme</code> ไม่ใช่ root</li>
+<li>compose เข้าร่วม network <code>netwatch-engine</code> แบบ <code>external</code> backend จึงเรียก <code>zabbix-web:8080</code> และ <code>db:5432</code> ได้ และ Connector เรียก <code>backend:8000</code> ได้</li>
+<li>เปิด port แค่ <code>127.0.0.1:8000</code> และ Redis ไม่เปิด port เลย</li></ul>
+
+<h3>Test ทั้งหมด</h3>
+<table>
+<tr><th>ไฟล์</th><th>จำนวน</th><th>ครอบคลุม</th></tr>
+<tr><td><code>test_connector_schema.py</code></td><td>8</td><td>1.2: payload จริง, บรรทัดเสีย, field ใหม่</td></tr>
+<tr><td><code>test_mapper_adapter.py</code></td><td>24</td><td>1.3: ref, เวลา, severity, status, adapter (MockTransport), decoder</td></tr>
+<tr><td><code>test_store.py</code></td><td>8 × 2</td><td>1.4: contract เดียวกันกับ SQLite และ Postgres</td></tr>
+<tr><td><code>test_api.py</code></td><td>16</td><td>1.5–1.7: HTTP ทั้งเส้น, tenant isolation, cache, 502</td></tr>
+<tr><td><code>test_stream_auth_domain.py</code></td><td>9</td><td>1.1, 1.7, 1.8: naive datetime, scrypt, session, stream filter, heartbeat</td></tr>
+<tr><td><code>test_boundary.py</code></td><td>13</td><td>§4 ใน Python (ใช้ใน CI ที่ไม่มี bash) + ตัวอย่างที่ต้องจับได้/ต้องไม่จับ</td></tr>
+</table>
+<pre>cd backend &amp;&amp; .venv/Scripts/python -m pytest -q
+# 78 passed, 8 skipped        (8 skipped = Postgres; รันใน container ได้ 16 passed)
+bash ops/check-boundary.sh
+# check-boundary: OK (backend/app/domain backend/app/services backend/app/api backend/app/auth)</pre>
+<div class="note">pytest จะขึ้น warning <code>StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated</code> ซึ่งมาจาก Starlette 1.7 ไม่ใช่โค้ดเรา test ยังผ่าน ค่อยย้ายไปใช้ client ตัวใหม่ทีหลัง</div>
+
+<!-- ============================================================ -->
+<h2>13. ทดสอบแบบ end-to-end กับ engine จริง</h2>
+<p>ลำดับทั้งหมดที่ใช้บนเครื่องนี้ ทำซ้ำได้ตั้งแต่ต้น:</p>
+<pre># 0) engine ต้อง healthy
+docker compose -f engine/docker-compose.yml ps
+
+# 1) store ของเรา (ครั้งแรกครั้งเดียว)
+ACME_DB_PASSWORD=$(grep '^ACME_DB_PASSWORD=' backend/.env | cut -d= -f2- | tr -d '\r') bash ops/init-store.sh --test-db
+
+# 2) backend + Redis
+docker compose -f backend/docker-compose.dev.yml up -d --build
+curl -s http://127.0.0.1:8000/healthz                      # {"status":"ok"}
+docker logs NetWatch-backend 2>&amp;1 | grep "startup complete"   # ต้องขึ้น 2 บรรทัด (2 workers)
+
+# 3) tenant ทดลอง + user
+ENGINE_TOKEN=$(grep '^ENGINE_TOKEN=' backend/.env | cut -d= -f2 | tr -d '\r')
+docker compose -f backend/docker-compose.dev.yml exec -T -e ENGINE_TOKEN="$ENGINE_TOKEN" backend python -m app.zabbix.lab_tenant
+docker compose -f backend/docker-compose.dev.yml exec backend python -m app.auth.cli add-user labuser lab
+
+# 4) Connector → backend     (ดูหัวข้อ 1.5)
+# 5) login → SSE → push probe 1/0     (ดูหัวข้อ 1.8)
+# 6) /metrics ไม่แตะ engine          (ดูหัวข้อ 1.6)</pre>
+
+<h3>ถ้าจะหยุด/เริ่มใหม่</h3>
+<pre>docker compose -f backend/docker-compose.dev.yml down        # หยุด backend + Redis (ข้อมูลใน acme ยังอยู่)
+docker compose -f backend/docker-compose.dev.yml up -d       # เริ่มใหม่</pre>
+<div class="note">ระหว่างที่ backend หยุด Connector จะ retry แล้วทิ้งข้อมูลช่วงนั้น (max_attempts 3) ซึ่งยอมรับได้ใน dev ส่วนใน appliance ให้ดูคิวด้วย internal item <code>zabbix[connector_queue]</code> (Phase 4)
+ถ้าจะกลับไปใช้ sink ใน lab ให้ <code>connector.update</code> URL กลับไปที่ <code>netwatch-sink</code></div>
+
+<!-- ============================================================ -->
+<h2>14. Decision ที่ปิดใน Phase นี้</h2>
+<table>
+<tr><th>ADR</th><th>เรื่อง</th><th>ตัดสินใจ</th><th>ผลที่ต้องรู้</th></tr>
+<tr><td><code>0006</code></td><td>ข้างใน <code>device_ref</code></td><td>ชื่อ host เชิงเทคนิค (<code>host.host</code>)</td><td>payload ไม่มี hostid · <b>เปลี่ยนชื่อ host = อุปกรณ์ใหม่</b> ให้ถือชื่อ host เป็น ID ถาวร</td></tr>
+<tr><td><code>0007</code></td><td>store อยู่ที่ไหน + เก็บนานเท่าไร</td><td>DB <code>acme</code> + role <code>acme_app</code> ใน PG instance เดียวกัน, REVOKE CONNECT, ข้อมูลดิบเก็บ 30 วัน</td><td>ต้องยืนยัน retention กับลูกค้าก่อน Phase 4 · ย้ายไป container แยกได้ด้วย pg_dump</td></tr>
+<tr><td><code>0008</code></td><td>วิธี login</td><td>password (scrypt) → token ลงลายเซ็น HMAC ใน cookie HttpOnly (หรือ Bearer)</td><td>ยังไม่มี SSO · rate limit ไปทำที่ reverse proxy ใน Phase 4</td></tr>
+</table>
+<p>ทั้ง 3 เรื่องถูกเพิ่มลงในตาราง <code>CLAUDE.md</code> §8 แล้ว ถ้าไม่เห็นด้วยข้อไหน ให้แก้ ADR ก่อน แล้วค่อยแก้โค้ด (ส่วนที่ต้องแก้มีบอกไว้ในแต่ละ ADR)</p>
+
+<!-- ============================================================ -->
+<h2>15. ข้อจำกัดที่รู้อยู่ และงานต่อใน Phase 2</h2>
+<table>
+<tr><th>เรื่อง</th><th>สถานะตอนนี้</th><th>ทำเมื่อไร</th></tr>
+<tr><td>ชื่อ metric</td><td>ใช้ <b>ชื่อ item</b> จาก payload (ใน payload ไม่มี item key และ units)</td><td>Phase 2: ดึง key/units จาก <code>item.get</code> แล้ว cache ตาม itemid ใน mapper</td></tr>
+<tr><td>counter 64-bit</td><td>เก็บเป็น <code>DOUBLE</code> ค่าที่เกิน 2<sup>53</sup> จะเสียความแม่นที่หลักท้าย ยังไม่ได้เห็นค่าจริงใน lab</td><td>2.4: ตรวจกับ <code>ifHCInOctets</code> จริง (ปกติ throughput ส่งเป็น bps แบบ float ซึ่งไม่มีปัญหานี้)</td></tr>
+<tr><td>value แบบ text/log</td><td>ยังไม่เก็บ (ไม่ใช่ metric)</td><td>เมื่อมี use case เช่นแสดง firmware version</td></tr>
+<tr><td>tenant + user</td><td>ใช้ <code>lab_tenant.py</code> + <code>app.auth.cli</code></td><td>2.3: <code>provisioning/provision.py</code> ทำแทนแบบ idempotent พร้อม check ADR 0004 ทุกรอบ</td></tr>
+<tr><td>host tag <code>role</code>, <code>site</code></td><td>host ใน lab ยังไม่มี tag จึงขึ้นเป็น <code>kind: other</code> และ <code>site: ""</code></td><td>2.3: provisioning ใส่ tag ตาม <code>inventory.csv</code></td></tr>
+<tr><td>problem ที่ข้ามหลาย host</td><td>เก็บไว้ใต้ host แรก</td><td>ปรับถ้ามี trigger แบบหลาย host จริง</td></tr>
+<tr><td>Connector ตอน backend ล่ม</td><td>retry 3 ครั้งแล้วทิ้ง</td><td>Phase 4: health check + เฝ้าคิว</td></tr>
+</table>
+
+<div class="pass"><b>Phase 1 ปิดแล้ว</b> ขั้นถัดไปตาม rebuild plan คือ <b>Phase 2: Provisioning และอุปกรณ์จริง</b> เริ่มจาก 2.1 export template ต้นฉบับ
+ส่วน Phase 3 (frontend) เริ่มคู่ขนานได้เลย เพราะ read API ของ 1.6 คงที่แล้ว</div>
+
+</body>
+</html>

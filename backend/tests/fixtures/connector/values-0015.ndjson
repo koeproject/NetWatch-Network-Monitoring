@@ -1,0 +1,2 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"system"}],"itemid":44788,"name":"Connector queue","clock":1791395308,"ns":467837284,"value":0,"type":3}
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"gathering-process"}],"itemid":46048,"name":"Utilization of snmp poller data collector processes, in %","clock":1791395308,"ns":467863206,"value":0,"type":0}

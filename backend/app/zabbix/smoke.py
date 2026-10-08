@@ -14,6 +14,8 @@ from app.zabbix.client import ZabbixAPIError, ZabbixClient
 
 async def main() -> None:
     settings = get_settings()
+    if not settings.engine_token:
+        raise SystemExit("ENGINE_TOKEN is not set in backend/.env")
     async with ZabbixClient(settings.engine_url) as client:
         print("version:", await client.version())
 

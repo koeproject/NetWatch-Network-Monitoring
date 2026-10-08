@@ -1,0 +1,2 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"system"}],"itemid":42266,"name":"Zabbix agent availability","clock":1791395306,"ns":465236135,"value":0,"type":3}
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"internal-process"}],"itemid":33026,"name":"Utilization of availability manager internal processes, in %","clock":1791395306,"ns":465267688,"value":0.016949152542372881,"type":0}

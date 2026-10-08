@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"internal-process"}],"itemid":29823,"name":"Utilization of alert syncer internal processes, in %","clock":1791395283,"ns":443079536,"value":0.0338409475465313,"type":0}

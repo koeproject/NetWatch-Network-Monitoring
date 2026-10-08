@@ -253,6 +253,9 @@ tiles specifically is a separate, still-open call — see
 | 3 | Zabbix proxy on-site vs direct polling | `engine/`, network design | OPEN |
 | 4 | Multi-tenant token strategy | `backend/app/zabbix/client.py`, `backend/app/auth/` | **RESOLVED and VERIFIED** — see `docs/decisions/0004-multi-tenant-token-strategy.md`. Admin token for config/provisioning; **per-tenant Zabbix user + API token for the read path**, so Zabbix host-group permissions are a second line of defence. `client.py` takes the token as a parameter — never read it from `config.py`. The ADR's verification procedure is now automated: `provisioning/provision.py` runs it on **every** run and prints PASS/FAIL per tenant. First passed 2026-09-10 (acme-hq sees exactly its 8 hosts, branch-co exactly its 1). |
 | 5 | Where a "latest value" comes from | `zabbix/adapter.py`, `store/`, tiles | **RESOLVED** — `docs/decisions/0005-latest-value-source.md`. Our own store, not `item.get`'s `lastvalue`. |
+| 6 | What is inside `device_ref` | `zabbix/mapper.py`, store | **RESOLVED** — `docs/decisions/0006-device-ref-is-host-name.md`. Technical host name (the push carries names, not hostids). Host names are permanent IDs: renaming one starts a new device. |
+| 7 | Store placement + retention | `store/`, `ops/init-store.sh` | **RESOLVED for Phase 1** — `docs/decisions/0007-store-placement-and-retention.md`. DB `acme` + role `acme_app` in the engine's PG instance, CONNECT on the engine DB revoked; raw points 30 days. Confirm retention with the customer before Phase 4. |
+| 8 | Portal login | `auth/`, `api/auth.py` | **RESOLVED for Phase 1** — `docs/decisions/0008-portal-login.md`. Password (scrypt) → HMAC-signed session token in an HttpOnly cookie (or Bearer). No SSO yet. |
 
 ---
 

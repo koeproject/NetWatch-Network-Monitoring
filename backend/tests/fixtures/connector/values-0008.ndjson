@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"internal-process"}],"itemid":45499,"name":"Utilization of discovery worker internal processes, in %","clock":1791395299,"ns":458000392,"value":0,"type":0}

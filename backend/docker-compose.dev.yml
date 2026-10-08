@@ -1,0 +1,52 @@
+# backend/docker-compose.dev.yml -- hand-written (CLAUDE.md §5).
+#
+# Phase 1 dev stack: our backend + Redis, joined to the engine's network so
+#   - the engine's Connector can POST to http://backend:8000/hooks/...
+#   - the backend reaches the engine API at http://zabbix-web:8080
+#   - the backend reaches our store (database acme) on the engine's db host
+# The full appliance compose is Phase 4 (ops/docker-compose.acme.yml).
+#
+#   docker compose -f backend/docker-compose.dev.yml up -d --build
+
+name: netwatch-backend
+
+services:
+  backend:
+    build: .
+    container_name: NetWatch-backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENGINE_URL: http://zabbix-web:8080
+      # The running backend never holds the admin token (ADR 0004).
+      ENGINE_TOKEN: ""
+      STORE_URL: postgresql://acme_app:${ACME_DB_PASSWORD:?set ACME_DB_PASSWORD in backend/.env}@db:5432/acme
+      REDIS_URL: redis://redis:6379/0
+      # Plain http on localhost in dev; the appliance sits behind TLS.
+      COOKIE_SECURE: "false"
+    depends_on:
+      - redis
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - engine
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  redis:
+    image: redis:7.4.5-alpine
+    container_name: NetWatch-redis
+    restart: unless-stopped
+    # Cache and pub/sub only: nothing here needs to survive a restart.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - engine
+
+networks:
+  engine:
+    external: true
+    name: netwatch-engine

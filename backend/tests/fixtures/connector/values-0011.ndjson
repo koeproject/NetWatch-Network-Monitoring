@@ -1,0 +1,2 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"system"}],"itemid":33024,"name":"Trend function cache, % of unique requests","clock":1791395304,"ns":463314374,"value":0,"type":0}
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"internal-process"}],"itemid":23664,"name":"Utilization of task manager internal processes, in %","clock":1791395304,"ns":463338562,"value":0,"type":0}

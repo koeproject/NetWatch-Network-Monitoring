@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"internal-process"}],"itemid":33027,"name":"Utilization of history poller internal processes, in %","clock":1791395307,"ns":466405500,"value":0,"type":0}

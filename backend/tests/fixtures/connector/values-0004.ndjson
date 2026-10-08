@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"system"},{"tag":"component","value":"nvps"}],"itemid":10078,"name":"Number of processed not supported values per second","clock":1791395278,"ns":437760807,"value":0.13319507292947746,"type":0}

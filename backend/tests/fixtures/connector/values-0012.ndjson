@@ -1,0 +1,1 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"system"}],"itemid":33025,"name":"Trend function cache, % of misses","clock":1791395305,"ns":464895280,"value":0,"type":0}

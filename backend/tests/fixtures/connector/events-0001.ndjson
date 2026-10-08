@@ -1,0 +1,1 @@
+{"clock":1791395301,"ns":288186659,"value":1,"eventid":20,"name":"Lab: event probe is 1","severity":2,"hosts":[{"host":"Zabbix server","name":"Zabbix server"}],"groups":["Zabbix servers"],"tags":[{"tag":"scope","value":"lab"},{"tag":"component","value":"lab"}]}

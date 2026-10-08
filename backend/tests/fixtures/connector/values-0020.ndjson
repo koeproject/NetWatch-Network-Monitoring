@@ -1,0 +1,2 @@
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"lab"}],"itemid":50740,"name":"Lab event probe","clock":1791395313,"ns":500862698,"value":0,"type":3}
+{"host":{"host":"Zabbix server","name":"Zabbix server"},"groups":["Zabbix servers"],"item_tags":[{"tag":"component","value":"system"}],"itemid":28534,"name":"LLD queue","clock":1791395314,"ns":475401776,"value":0,"type":3}
