@@ -10,7 +10,10 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+# No external commands here: a bash without coreutils on PATH would turn
+# "$(dirname ...)" into "" and silently cd to "/", scanning nothing.
+cd "${BASH_SOURCE[0]%/*}/.."
+[ -f CLAUDE.md ] || { echo "check-boundary: not at repo root ($PWD)" >&2; exit 2; }
 
 GUARDED=(
   backend/app/domain
