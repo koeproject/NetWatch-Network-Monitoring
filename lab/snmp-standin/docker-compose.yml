@@ -1,0 +1,45 @@
+# lab/snmp-standin/docker-compose.yml -- hand-written (CLAUDE.md §5).
+#
+# Three stand-ins on the engine's network with fixed IPs, matching
+# provisioning/lab-standin.csv. The engine polls them directly (no NAT).
+#
+#   docker compose -f lab/snmp-standin/docker-compose.yml up -d --build
+#
+# Needs lab/snmp-standin/.env (gitignored) with SNMP_USER, SNMP_AUTH, SNMP_PRIV.
+
+name: netwatch-lab
+
+x-standin: &standin
+  build: .
+  env_file: .env
+  restart: "no"
+
+services:
+  lab-core:
+    <<: *standin
+    container_name: LAB-CORE
+    hostname: LAB-CORE
+    networks:
+      engine:
+        ipv4_address: 172.18.10.1
+
+  lab-acc:
+    <<: *standin
+    container_name: LAB-ACC
+    hostname: LAB-ACC
+    networks:
+      engine:
+        ipv4_address: 172.18.10.11
+
+  lab-ap:
+    <<: *standin
+    container_name: LAB-AP
+    hostname: LAB-AP
+    networks:
+      engine:
+        ipv4_address: 172.18.10.21
+
+networks:
+  engine:
+    external: true
+    name: netwatch-engine

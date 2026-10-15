@@ -1,0 +1,7 @@
+# technical_name = device_ref (ADR 0006): permanent. Renaming it starts a new device.
+# role: core | access | ap        parent: technical_name of the uplink device (empty for core)
+# No credentials here, ever: SNMPv3 lives in the engine's global secret macros.
+# One device first (step 2.5). Device rows go BELOW the header line: remove the
+# leading "# " from the example and put the real address and model.
+technical_name,display_name,role,tenant,site,address,model,parent
+# CORE-SW-01,Core Switch 01,core,acme-hq,HQ,<real IP>,<real model>,

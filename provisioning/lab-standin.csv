@@ -1,0 +1,6 @@
+# Lab stand-in (lab/snmp-standin/): Linux net-snmp containers, NOT Cisco.
+# Use with NETWATCH_INVENTORY=/srv/provisioning/lab-standin.csv. Never export these hosts.
+technical_name,display_name,role,tenant,site,address,model,parent
+LAB-CORE,Lab stand-in core,core,acme-hq,LAB,172.18.10.1,net-snmp stand-in,
+LAB-ACC,Lab stand-in access,access,acme-hq,LAB,172.18.10.11,net-snmp stand-in,LAB-CORE
+LAB-AP,Lab stand-in AP,ap,acme-hq,LAB,172.18.10.21,net-snmp stand-in,LAB-ACC

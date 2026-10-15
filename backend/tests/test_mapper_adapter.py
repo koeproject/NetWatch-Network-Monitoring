@@ -16,6 +16,7 @@ from app.zabbix import mapper
 from app.zabbix.adapter import ZabbixAdapter
 from app.zabbix.client import ZabbixClient
 from app.zabbix.connector_ingest import ConnectorDecoder
+from app.zabbix.connector_schema import HostRef, Tag, ValueLine
 
 FIXTURES = Path(__file__).parent / "fixtures" / "connector"
 
@@ -136,6 +137,23 @@ def test_decoder_keeps_numeric_values_only() -> None:
     assert [(p.device_ref, p.metric, p.value) for p in points] == [
         ("Zabbix server", "Lab event probe", 0.0)
     ]
+
+
+def test_metric_name_prefers_metric_tag() -> None:
+    line = ValueLine(
+        host=HostRef(host="CORE-SW-01", name="Core Switch 01"),
+        item_tags=[Tag(tag="component", value="network"), Tag(tag="metric", value="if_in_bps:Gi1/0/1")],
+        itemid=1,
+        name="Interface Gi1/0/1(Uplink): Bits received",
+        clock=1791395275,
+        value=1500.0,
+        type=0,
+    )
+    point = mapper.metric_from_value(line)
+    assert point is not None and point.metric == "if_in_bps:Gi1/0/1"
+
+    untagged = mapper.metric_from_value(line.model_copy(update={"item_tags": []}))
+    assert untagged is not None and untagged.metric == "Interface Gi1/0/1(Uplink): Bits received"
 
 
 def test_decoder_events() -> None:

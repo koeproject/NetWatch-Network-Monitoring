@@ -54,6 +54,11 @@ _IN_MAINTENANCE = "1"
 _IF_AVAILABLE = "1"
 _IF_UNAVAILABLE = "2"
 
+# Item tag that carries OUR metric name (set in templates/netwatch/). The push
+# never carries the item key, and display names embed the port description,
+# which the customer may edit on the switch.
+_METRIC_TAG = "metric"
+
 
 # -- refs -------------------------------------------------------------------
 def device_ref(host: str) -> str:
@@ -118,13 +123,21 @@ def device_from_api(host: Mapping[str, Any]) -> Device:
 
 
 # -- Connector lines ----------------------------------------------------------
+def metric_name(line: ValueLine) -> str:
+    """The item's "metric" tag if it has one, else its display name."""
+    for t in line.item_tags:
+        if t.tag == _METRIC_TAG and t.value:
+            return t.value
+    return line.name
+
+
 def metric_from_value(line: ValueLine) -> MetricPoint | None:
     """Numeric items only. Character, log and text values are not metrics."""
     if line.type not in NUMERIC_VALUE_TYPES or isinstance(line.value, str):
         return None
     return MetricPoint(
         device_ref=device_ref(line.host.host),
-        metric=line.name,
+        metric=metric_name(line),
         ts=to_datetime(line.clock, line.ns),
         value=float(line.value),
     )

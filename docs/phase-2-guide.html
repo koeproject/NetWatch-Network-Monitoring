@@ -1,0 +1,1233 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>Phase 2 Guide — NetWatch</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 16mm 14mm; }
+  :root { --ink:#1f2328; --muted:#57606a; --line:#d0d7de; --accent:#1f5fa8; --bg:#f6f8fa;
+          --ok:#1a7f37; --warn:#9a6700; --bad:#b42318; }
+  body { font-family: "Leelawadee UI", "Noto Sans Thai", Tahoma, sans-serif; color:var(--ink);
+         font-size: 10.5pt; line-height: 1.6; margin:0; }
+  h1 { font-size: 22pt; margin: 0 0 6px; }
+  h2 { font-size: 15pt; color: var(--accent); border-bottom: 2px solid var(--accent);
+       padding-bottom: 4px; margin: 0 0 12px; break-before: page; }
+  h2.first { break-before: auto; }
+  h3 { font-size: 12pt; margin: 18px 0 8px; padding: 4px 10px; background: var(--bg);
+       border-left: 4px solid var(--accent); break-after: avoid; }
+  h4 { font-size: 10.5pt; margin: 12px 0 4px; color: var(--muted); break-after: avoid; }
+  p { margin: 6px 0; }
+  code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 9pt; background: var(--bg);
+         padding: 0 3px; border-radius: 3px; }
+  pre { font-family: Consolas, "Cascadia Mono", monospace; font-size: 8.4pt; line-height: 1.45;
+        background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+        white-space: pre-wrap; word-break: break-word; margin: 6px 0 10px; }
+  table { border-collapse: collapse; width: 100%; margin: 6px 0 12px; font-size: 9.5pt; break-inside: avoid; }
+  th, td { border: 1px solid var(--line); padding: 4px 7px; vertical-align: top; text-align: left; }
+  th { background: var(--bg); }
+  .meta { color: var(--muted); font-size: 9.5pt; }
+  .note { border: 1px solid var(--line); border-left: 4px solid var(--warn); background: #fff8e6;
+          padding: 6px 10px; margin: 8px 0; break-inside: avoid; }
+  .rule { border: 1px solid var(--line); border-left: 4px solid var(--bad); background: #fff1f0;
+          padding: 6px 10px; margin: 8px 0; break-inside: avoid; }
+  .pass { border: 1px solid var(--line); border-left: 4px solid var(--ok); background: #eefbf1;
+          padding: 6px 10px; margin: 8px 0; break-inside: avoid; }
+  .ok { color: var(--ok); font-weight: 700; }
+  .todo { color: var(--warn); font-weight: 700; }
+  ul, ol { margin: 4px 0 8px; padding-left: 22px; }
+  li { margin: 2px 0; }
+  .cover { height: 250mm; display:flex; flex-direction:column; justify-content:center; }
+  .cover .tag { color: var(--accent); font-weight: 700; letter-spacing: .5px; }
+  .toc li { margin: 3px 0; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="tag">NETWATCH · PHASE 2 GUIDE</div>
+  <h1>Phase 2: Provisioning และอุปกรณ์จริง — วิธีทำ และคำอธิบายโค้ด</h1>
+  <p style="font-size:12pt;color:var(--muted)">ให้ <code>inventory.csv</code> เป็นแหล่งความจริงเพียงที่เดียวของ host, host group, tag และ tenant
+  จากนั้น poll Cisco ตัวจริงด้วย SNMPv3 ตรวจค่าที่ได้เทียบกับ CLI และทำ dependent trigger ให้ core ล่มแล้วมี alert ตัวเดียว</p>
+  <p class="meta" style="margin-top:24px">
+    ฉบับวันที่ 12 ตุลาคม 2026 · คู่กับ <code>docs/rebuild-plan.pdf</code> (หัวข้อ 5) และ <code>docs/phase-1-guide.html</code><br>
+    เป้าหมาย: Zabbix 7.0.29 · TimescaleDB 2.28.3 (PG16) · Python 3.12 (container)<br>
+    <b>สถานะ:</b> ขั้น 2.0 ทำเสร็จและตรวจแล้ว (ผลในเอกสารเป็นผลจริง) ส่วนขั้นอื่นเป็น <b>ผลที่คาดหวัง</b> ซึ่งยังไม่ได้รันจริง
+  </p>
+</section>
+
+<h2 class="first">สารบัญ</h2>
+<ol class="toc">
+  <li>สถานะและเงื่อนไขปิด phase</li>
+  <li>ภาพรวม: ไฟล์ทั้งหมด และสิ่งที่ต้องแก้ใน backend</li>
+  <li>2.0 เตรียม: global macro ของ SNMPv3 และ helper <code>nw</code></li>
+  <li>2.1 Export template upstream (<code>export.py</code>)</li>
+  <li>2.2 Clone template แล้วใส่ tag (UI)</li>
+  <li>2.3 Mapper อ่านชื่อ metric จาก tag</li>
+  <li>2.4 <code>inventory.csv</code>, <code>catalog.py</code>, <code>provision.py</code>, <code>verify.py</code></li>
+  <li>2.5 Core switch ตัวแรก (IOS config + provision)</li>
+  <li>2.6 เทียบค่ากับ <code>show interfaces</code></li>
+  <li>2.7 Tag filter ของ Connector</li>
+  <li>2.8 Rollout และทดสอบ dependent trigger</li>
+  <li>เงื่อนไขปิด phase: คำสั่งตรวจรวม</li>
+  <li>Decision และงานที่ยังไม่ได้ทำ</li>
+</ol>
+
+<div class="note"><b>วิธีอ่าน:</b> แต่ละขั้นมีหัวข้อเหมือนกันหมด คือ เป้าหมาย → ไฟล์ → โค้ด/ขั้นตอน → ตรวจว่าผ่าน → ข้อผิดพลาดที่พบบ่อย
+โค้ดในเอกสารนี้เป็น<b>โค้ดเต็ม</b> เพราะไฟล์ยังไม่มีใน repo
+คำสั่งทั้งหมดรันใน <b>Windows PowerShell 5.1</b> จาก root ของ repo (<code>C:\Users\chnwi\OneDrive\Documents\NetWatch</code>) ยกเว้นที่เขียนว่า <code>cd backend</code>
+และใช้ helper <code>nw</code>, <code>engine</code>, <code>portal</code>, <code>boundary</code> จาก <code>$PROFILE</code> (ขั้น 2.0 ข)
+ชื่อใหม่ทั้งหมดใช้ <code>netwatch</code> ส่วนของเดิมจาก Phase 1 (DB <code>acme</code>, connector <code>acme-values</code>) ยังใช้ชื่อเดิมจนกว่าจะ rename</div>
+
+<!-- ============================================================ -->
+<h2>1. สถานะและเงื่อนไขปิด phase</h2>
+
+<p>เงื่อนไขปิด phase จาก rebuild plan: "<i>inventory.csv คือที่มาของทุกอย่าง, throughput ตรงกับ show interfaces,
+core ล่มแล้วได้ alert ตัวเดียว ไม่ใช่ N ตัว</i>"</p>
+
+<table>
+<tr><th>เงื่อนไข</th><th>ตรวจด้วย</th><th>สถานะ</th></tr>
+<tr><td>global macro ของ SNMPv3 ครบ และเป็น Secret text</td><td><code>usermacro.get</code> (2.0)</td><td class="ok">✔ 12 ต.ค.</td></tr>
+<tr><td>helper <code>nw</code> คุยกับ engine ได้ และ mount ถูกต้อง</td><td><code>nw app.zabbix.smoke</code> (2.0)</td><td class="ok">✔ 12 ต.ค.</td></tr>
+<tr><td>template upstream export ลง <code>templates/upstream/</code> และรันซ้ำได้ <code>unchanged</code></td><td>2.1</td><td class="ok">✔ 12 ต.ค.</td></tr>
+<tr><td><code>provision.py</code> รันครั้งที่สองได้ <code>0 changes</code></td><td>2.5</td><td class="todo">รอ</td></tr>
+<tr><td>ADR 0004 PASS ทุก tenant ในทุกรอบที่ provision</td><td>2.5, 2.8</td><td class="todo">รอ</td></tr>
+<tr><td><code>verify.py</code> PASS ทุกอุปกรณ์</td><td>2.5, 2.8</td><td class="todo">รอ</td></tr>
+<tr><td>throughput 3 พอร์ตต่างจาก <code>show interfaces</code> ไม่เกิน ±10%</td><td>2.6</td><td class="todo">รอ</td></tr>
+<tr><td>core + access ติดต่อไม่ได้ แต่ได้ problem ตัวเดียว (core)</td><td>2.8</td><td class="todo">รอ</td></tr>
+<tr><td>template ของเรา export ลง git แล้ว และ upstream ไม่ถูกแก้</td><td>2.1, 2.2</td><td class="todo">รอ</td></tr>
+<tr><td>pytest ผ่าน, <code>check-boundary.sh</code> OK</td><td>2.3</td><td class="todo">รอ</td></tr>
+</table>
+
+<div class="note"><b>Blocked:</b> template ของ Aruba ต้องรอ decision #1 (AOS-8 หรือ AOS-10 + Central) ซึ่งขึ้นกับ PO ของลูกค้า
+ระหว่างนี้ AP ใช้ ICMP อย่างเดียว ส่วน decision #3 (proxy on-site) ต้องปิดก่อน rollout site ที่ต้อง poll ข้าม WAN</div>
+
+<!-- ============================================================ -->
+<h2>2. ภาพรวม: ไฟล์ทั้งหมด และสิ่งที่ต้องแก้ใน backend</h2>
+
+<h3>ไฟล์ใน Phase 2</h3>
+<table>
+<tr><th>ไฟล์</th><th>หน้าที่</th><th>ขั้น</th></tr>
+<tr><td><code>provisioning/__init__.py</code></td><td>ไฟล์ว่าง ทำให้รัน <code>python -m provisioning.xxx</code> ได้</td><td>2.0 ✔</td></tr>
+<tr><td><code>provisioning/export.py</code></td><td>export template/host เป็น YAML เพื่อดู diff ใน git</td><td>2.1</td></tr>
+<tr><td><code>templates/upstream/*.yaml</code></td><td>template ต้นฉบับตามที่มากับ Zabbix (READ ONLY)</td><td>2.1</td></tr>
+<tr><td><code>templates/netwatch/templates/*.yaml</code></td><td>template ที่ clone แล้วใส่ tag ของเรา</td><td>2.2</td></tr>
+<tr><td><code>backend/app/zabbix/mapper.py</code></td><td>อ่านชื่อ metric จาก item tag <code>metric</code></td><td>2.3</td></tr>
+<tr><td><code>backend/tests/test_mapper_adapter.py</code></td><td>test ของข้อบน</td><td>2.3</td></tr>
+<tr><td><code>provisioning/inventory.csv</code></td><td>รายการอุปกรณ์ (ไม่มี credential)</td><td>2.4</td></tr>
+<tr><td><code>provisioning/catalog.py</code></td><td>role → template, interface, tag</td><td>2.4</td></tr>
+<tr><td><code>provisioning/provision.py</code></td><td>push inventory เข้า engine และ store แบบ idempotent พร้อม ADR 0004 check</td><td>2.4</td></tr>
+<tr><td><code>provisioning/verify.py</code></td><td>ตรวจ engine เทียบกับ inventory (อ่านอย่างเดียว)</td><td>2.4</td></tr>
+<tr><td><code>templates/netwatch/hosts/*.yaml</code></td><td>export ของ host เพื่อดู diff</td><td>2.5</td></tr>
+<tr><td><code>docs/decisions/0009-metric-name-from-item-tag.md</code></td><td>บันทึกการตัดสินใจในขั้น 2.3</td><td>2.3</td></tr>
+</table>
+
+<h3>ทำไมต้องแก้ mapper</h3>
+<p>ตอนนี้ <code>mapper.metric_from_value()</code> ใช้ <b>ชื่อ item</b> เป็นชื่อ metric (<code>metric=line.name</code>)
+แต่ template ของ Cisco ตั้งชื่อ item แบบ <code>Interface Gi1/0/1(Uplink to AP): Bits received</code> ซึ่งมี description ของพอร์ตอยู่ในชื่อ
+ถ้าใครแก้ <code>description</code> บนสวิตช์ จะได้ metric ใหม่ และกราฟจะขาดตอน</p>
+<p>Push ไม่มี item key มาด้วย (<code>docs/connector-payload.md</code>) แต่มี <code>item_tags</code> มา ทางแก้จึงเป็น
+<b>ใส่ tag <code>metric</code> ให้ item ที่เราต้องการ</b> แล้วให้ mapper อ่านชื่อ metric จาก tag นั้น จากนั้นกรอง Connector ให้ส่งมาเฉพาะ item ที่มี tag นี้ (2.7)
+ซึ่งยังช่วยลดปริมาณข้อมูลด้วย</p>
+<div class="note">phase-1-guide ข้อ 15 เคยวางแผนว่าจะดึง key/units ด้วย <code>item.get</code> แล้ว cache ตาม itemid
+แผนนี้เปลี่ยนเป็นใช้ tag แทน เพราะไม่ต้องเรียก API ฝั่ง ingest และชื่อ metric เป็นชื่อของเราเองที่ไม่ผูกกับ item key ของ engine
+ข้อเสียคือยังไม่ได้ units (ค่อยทำทีหลัง) ให้บันทึกการตัดสินใจนี้เป็น ADR 0009</div>
+
+<h3>ลำดับการไหลของข้อมูลหลัง Phase 2</h3>
+<pre>inventory.csv ──► provision.py ──► engine: host group tenant/&lt;tenant&gt;/&lt;site&gt;
+                       │                    host + tag role/site/model + template NetWatch …
+                       │                    user group/user/token ต่อ tenant
+                       └──────────────► store ของเรา: tenant + token (เข้ารหัส)
+
+Cisco ◄── SNMPv3 ({$SNMPV3.*}) ── Zabbix server ── Connector (เฉพาะ item ที่มี tag metric) ──► /hooks/values
+                                                                                          └─► metric = tag "metric"</pre>
+
+<!-- ============================================================ -->
+<h2>3. ขั้น 2.0 — เตรียม <span class="ok">✔ เสร็จแล้ว</span></h2>
+
+<h3>ก. Global macro ของ SNMPv3</h3>
+<p><b>เป้าหมาย:</b> credential ของ SNMPv3 ต้องอยู่ใน DB ของ Zabbix เท่านั้น (§9) เพราะคนที่ใช้มันตอน poll คือ Zabbix server ไม่ใช่ backend ของเรา
+ใน git จะมีแค่<b>ชื่อ macro</b> ซึ่ง Zabbix server แทนค่าให้ตอน poll</p>
+<p>ไปที่ <b>Administration → Macros</b> กด <b>Add</b> แล้วเพิ่ม (ช่อง Value มี dropdown ให้เลือก type):</p>
+<table>
+<tr><th>Macro</th><th>Type</th><th>Value</th></tr>
+<tr><td><code>{$SNMPV3.USER}</code></td><td>Text</td><td><code>netwatch-poll</code></td></tr>
+<tr><td><code>{$SNMPV3.AUTH}</code></td><td><b>Secret text</b></td><td>auth passphrase (≥ 8 ตัวอักษร)</td></tr>
+<tr><td><code>{$SNMPV3.PRIV}</code></td><td><b>Secret text</b></td><td>priv passphrase (≥ 8 ตัวอักษร)</td></tr>
+</table>
+<ul>
+<li>ใช้ <b>global</b> เพราะไซต์นี้ใช้ SNMP user ชุดเดียว ถ้ามีสวิตช์ที่ใช้รหัสต่าง ให้ตั้ง macro ชื่อเดียวกันในระดับ host ซึ่งจะ override ค่า global</li>
+<li>ใช้ <b>Secret text</b> ไม่ใช่ Vault เพราะยังไม่มี HashiCorp/CyberArk และ Secret text จะไม่ถูกส่งกลับออกมาทาง UI หรือ API อีก</li>
+</ul>
+
+<h4>ตรวจว่าผ่าน (ผลจริง 12 ต.ค.)</h4>
+<pre>engine usermacro.get @{ globalmacro = $true; output = @('macro','type','value')
+  filter = @{ macro = @('{$SNMPV3.USER}','{$SNMPV3.AUTH}','{$SNMPV3.PRIV}') } } | Format-Table
+# macro          type value
+# -----          ---- -----
+# {$SNMPV3.USER} 0    netwatch-poll
+# {$SNMPV3.AUTH} 1                     &lt;- type 1 = Secret text, ไม่มี value
+# {$SNMPV3.PRIV} 1</pre>
+<div class="rule">ชื่อ macro ใน PowerShell ต้องอยู่ใน <b>single quote</b> (<code>'{$SNMPV3.AUTH}'</code>) ถ้าใช้ double quote PowerShell จะแทน <code>$SNMPV3</code> ด้วยตัวแปรที่ว่าง</div>
+
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul>
+<li><b>ลืมเปลี่ยน type เป็น Secret text:</b> รหัสจะโผล่ทั้งใน UI และ API ถ้าเกิดแล้ว ให้เปลี่ยน type <b>และเปลี่ยนรหัสใหม่</b>ทั้งบนสวิตช์และใน macro</li>
+<li><b>Passphrase สั้นกว่า 8 ตัว:</b> IOS ยอมรับคำสั่ง แต่ SNMPv3 จะ auth ไม่ผ่าน</li>
+<li><b>พิมพ์ชื่อผิด เช่น <code>{$SNMPV3_AUTH}</code>:</b> poll จะไม่ผ่านโดยไม่มี error ที่บอกชัดๆ ให้ดูที่บรรทัด <code>global macros</code> ของ <code>verify.py</code></li>
+<li><b>ลืมรหัส:</b> อ่านกลับไม่ได้ ต้องตั้งใหม่ ให้เก็บไว้ใน password manager ของทีม</li>
+</ul>
+
+<h3>ข. Helper ใน PowerShell profile</h3>
+<p><b>เป้าหมาย:</b> script ใน <code>provisioning/</code> ต้องเข้าถึงทั้ง engine API และ store ของเรา ซึ่งอยู่บน network <code>netwatch-engine</code> เท่านั้น
+จึงต้องรันใน container ชั่วคราวที่สร้างจาก image ของ backend แบบเดียวกับ <code>lab_tenant.py</code>
+นอกจากนี้ PowerShell 5.1 ไม่มี <code>jq</code> และ <code>curl</code> ของมันเป็น alias ของ <code>Invoke-WebRequest</code>
+จึงมี helper สำหรับเรียก engine API และ portal ด้วย</p>
+<pre>New-Item -ItemType Directory -Force provisioning, templates\upstream, templates\netwatch | Out-Null
+New-Item -ItemType File -Force provisioning\__init__.py | Out-Null</pre>
+
+<p><b>ไฟล์:</b> <code>$PROFILE</code> = <code>C:\Users\chnwi\OneDrive\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1</code>
+(อยู่นอก repo และโหลดเองทุกครั้งที่เปิด PowerShell)</p>
+<pre># NetWatch helpers (Phase 2). Run inside the NetWatch repo, any subfolder.
+#   nw &lt;module&gt; [args]      python -m &lt;module&gt; in a throwaway backend container (admin token)
+#   engine &lt;method&gt; @{...}  one JSON-RPC call to the engine with the admin token -> .result
+#   portal-login &lt;user&gt;     log in to our backend; then: portal /api/devices
+#   boundary                bash ops/check-boundary.sh
+
+function Get-NwRoot {
+  $root = git rev-parse --show-toplevel 2>$null
+  if (-not $root) { throw "not inside the NetWatch repo (cd into it first)" }
+  return $root
+}
+
+function Get-NwEnv([string]$Key) {
+  $line = Select-String -Path "$(Get-NwRoot)/backend/.env" -Pattern "^$Key=(.+)$" | Select-Object -First 1
+  if (-not $line) { throw "$Key not found in backend/.env" }
+  return $line.Matches[0].Groups[1].Value.Trim()
+}
+
+function nw {
+  $root = Get-NwRoot
+  docker compose -f "$root/backend/docker-compose.dev.yml" run --rm `
+    -v "${root}/provisioning:/srv/provisioning:ro" `
+    -v "${root}/templates:/srv/templates" `
+    -e "ENGINE_TOKEN=$(Get-NwEnv ENGINE_TOKEN)" backend python -m @args
+}
+
+function engine([string]$Method, $Params = @{}) {
+  $body = @{ jsonrpc = "2.0"; method = $Method; params = $Params; id = 1 } | ConvertTo-Json -Depth 20 -Compress
+  $headers = @{ Authorization = "Bearer $(Get-NwEnv ENGINE_TOKEN)" }
+  if ($Method -eq "apiinfo.version") { $headers = @{} }  # refuses an Authorization header
+  $resp = Invoke-RestMethod -Method Post -Uri "$(Get-NwEnv ENGINE_URL)/api_jsonrpc.php" `
+    -ContentType "application/json-rpc" -Headers $headers -Body ([Text.Encoding]::UTF8.GetBytes($body))
+  if ($resp.error) { throw "${Method}: [$($resp.error.code)] $($resp.error.message) $($resp.error.data)" }
+  return $resp.result
+}
+
+$script:NwPortal = $null
+function portal-login([string]$Username) {
+  $pw = Read-Host "password for $Username" -AsSecureString
+  $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($pw))
+  $body = @{ username = $Username; password = $plain } | ConvertTo-Json -Compress
+  Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/login" -ContentType "application/json" `
+    -Body $body -SessionVariable s | Out-Null
+  $script:NwPortal = $s
+  "logged in as $Username"
+}
+
+function portal([string]$Path) {
+  if (-not $script:NwPortal) { throw "run portal-login &lt;user&gt; first" }
+  Invoke-RestMethod -Uri "http://127.0.0.1:8000$Path" -WebSession $script:NwPortal
+}
+
+function boundary {
+  Push-Location (Get-NwRoot)
+  try { &amp; "C:\Program Files\Git\usr\bin\bash.exe" ops/check-boundary.sh } finally { Pop-Location }
+}</pre>
+<table>
+<tr><th>ส่วน</th><th>ทำไม</th></tr>
+<tr><td><code>Get-NwRoot</code></td><td>หา root ของ repo ด้วย <code>git rev-parse</code> จึงรัน helper จากโฟลเดอร์ไหนใน repo ก็ได้ และได้ path แบบ <code>C:/…</code> ที่ใช้ <code>/</code> ซึ่ง Docker รับได้</td></tr>
+<tr><td><code>Get-NwEnv</code></td><td>อ่าน <b>ทีละ key</b> จาก <code>backend/.env</code> ไม่โหลด secret ทั้งไฟล์เข้า environment ของ shell</td></tr>
+<tr><td><code>run --rm backend</code></td><td>container ชั่วคราวที่ได้ <code>env_file</code>, network และ <code>ENGINE_URL=http://zabbix-web:8080</code> จาก compose แล้วลบทิ้งเมื่อจบ</td></tr>
+<tr><td><code>provisioning:ro</code></td><td><code>WORKDIR</code> ของ image คือ <code>/srv</code> จึง import <code>provisioning</code> ได้ ที่ไม่ COPY เข้า image เพราะเป็นเครื่องมือของ admin ไม่ใช่ product</td></tr>
+<tr><td><code>templates</code> (read-write)</td><td><code>export.py</code> ต้องเขียน YAML กลับมาที่ repo</td></tr>
+<tr><td><code>-e ENGINE_TOKEN=…</code></td><td>compose ตั้ง <code>ENGINE_TOKEN: ""</code> เพราะ backend ที่รันจริงห้ามถือ admin token (ADR 0004) ตรงนี้ส่ง token ให้เฉพาะ container ชั่วคราว</td></tr>
+<tr><td><code>engine</code></td><td>ใช้แทน <code>curl … | jq</code> คืนค่า <code>.result</code> เป็น object ของ PowerShell จึงต่อ <code>Format-Table</code> หรือ <code>Where-Object</code> ได้ และ throw ถ้า engine ตอบ error</td></tr>
+<tr><td><code>portal-login</code> / <code>portal</code></td><td>login เข้า backend ของเรา (รหัสถูกถามแบบซ่อนตัวอักษร) แล้วเก็บ cookie ไว้ใน session ของ PowerShell ไม่เขียนลงไฟล์</td></tr>
+<tr><td><code>boundary</code></td><td><code>check-boundary.sh</code> เป็น bash script จึงเรียกผ่าน <code>bash.exe</code> ของ Git ด้วย path เต็ม เพราะ <code>bash</code> เฉยๆ อาจไปเจอ WSL</td></tr>
+</table>
+
+<h4>ตรวจว่าผ่าน (ผลจริง 12 ต.ค. รันจาก <code>backend\</code>)</h4>
+<pre>nw app.zabbix.smoke
+# version: 7.0.29
+# hosts: ['Zabbix server']
+# bad token rejected: host.get: [-32602] Invalid params. Not authorized.
+
+engine apiinfo.version
+# 7.0.29
+
+boundary
+# check-boundary: OK (backend/app/domain backend/app/services backend/app/api backend/app/auth)
+
+$root = git rev-parse --show-toplevel
+docker compose -f "$root/backend/docker-compose.dev.yml" run --rm `
+  -v "${root}/provisioning:/srv/provisioning:ro" -v "${root}/templates:/srv/templates" `
+  backend sh -c 'ls /srv/provisioning /srv/templates &amp;&amp; touch /srv/templates/.w &amp;&amp; rm /srv/templates/.w &amp;&amp; echo templates-writable'
+# /srv/provisioning: __init__.py
+# /srv/templates: netwatch  upstream
+# templates-writable
+# (เขียน /srv/provisioning ไม่ได้: Read-only file system ซึ่งถูกต้องตามที่ตั้งใจ)</pre>
+
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<table>
+<tr><th>อาการ</th><th>สาเหตุ</th></tr>
+<tr><td><code>The term 'nw' is not recognized</code></td><td>เปิด PowerShell ไว้ก่อนสร้าง profile ให้ปิดแล้วเปิดใหม่ หรือรัน <code>. $PROFILE</code></td></tr>
+<tr><td><code>… cannot be loaded because running scripts is disabled</code></td><td>execution policy เป็น <code>Restricted</code> ให้รัน <code>Set-ExecutionPolicy -Scope CurrentUser RemoteSigned</code> (เครื่องนี้เป็น <code>RemoteSigned</code> อยู่แล้ว)</td></tr>
+<tr><td><code>not inside the NetWatch repo</code></td><td>ต้อง <code>cd</code> เข้าโฟลเดอร์ใดก็ได้ใน repo ก่อน</td></tr>
+<tr><td>ชื่อ macro กลายเป็น <code>{.AUTH}</code></td><td>ใช้ double quote ต้องใช้ single quote</td></tr>
+<tr><td><code>curl</code> ได้ผลแปลกๆ</td><td>ใน 5.1 <code>curl</code> คือ <code>Invoke-WebRequest</code> ให้ใช้ <code>engine</code> / <code>portal</code> แทน (หรือ <code>curl.exe</code> ถ้าจำเป็นจริงๆ)</td></tr>
+<tr><td>บรรทัด <code>Container … Creating</code> เป็นตัวแดง</td><td>docker เขียนลง stderr แล้ว PowerShell 5.1 แสดงเป็น error ไม่ใช่ปัญหา ให้ดูผลที่บรรทัดถัดไป</td></tr>
+<tr><td>ได้ผลจาก code เก่า</td><td><code>run</code> ใช้ image ที่ build ไว้ ถ้าแก้ <code>backend/app/</code> ต้อง <code>docker compose -f backend/docker-compose.dev.yml up -d --build</code> ก่อน</td></tr>
+<tr><td><code>network netwatch-engine not found</code></td><td>engine ยังไม่ได้ start</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>4. ขั้น 2.1 — Export template upstream <span class="ok">✔ เสร็จแล้ว</span></h2>
+<p><b>เป้าหมาย:</b> เก็บ template ต้นฉบับไว้ใน git เพื่อให้ diff กับ clone ของเราได้ <code>templates/upstream/</code> เป็น READ ONLY คือห้ามแก้ ทำได้แค่ export ใหม่</p>
+<p><b>ไฟล์:</b> <code>provisioning/export.py</code> (import <code>catalog.py</code> จาก 2.4 จึงต้องเขียน <code>catalog.py</code> ก่อน)</p>
+<pre>"""Export engine templates and our hosts to YAML, so changes show up in git diff.
+
+    nw provisioning.export                                 # ours + inventory hosts
+    nw provisioning.export --upstream "Cisco IOS by SNMP"  # as shipped -> templates/upstream/
+
+templates/upstream/ is READ ONLY after the first export: never edit, only re-export.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import re
+from pathlib import Path
+
+from app.config import get_settings
+from app.zabbix.client import ZabbixClient
+from provisioning.catalog import TEMPLATE_PREFIX, load_inventory
+
+ROOT = Path(__file__).resolve().parent.parent
+OURS = ROOT / "templates" / "netwatch"
+UPSTREAM = ROOT / "templates" / "upstream"
+
+
+def _filename(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") + ".yaml"
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    old = path.read_text(encoding="utf-8") if path.exists() else None
+    if old == text:
+        print(f"unchanged {path.relative_to(ROOT)}")
+        return
+    path.write_text(text, encoding="utf-8", newline="\n")
+    print(f"{'updated' if old is not None else 'created'} {path.relative_to(ROOT)}")
+
+
+async def main() -> None:
+    parser = argparse.ArgumentParser(prog="python -m provisioning.export")
+    parser.add_argument("--upstream", metavar="TEMPLATE_NAME")
+    args = parser.parse_args()
+
+    settings = get_settings()
+    admin = settings.engine_token
+    if not admin:
+        raise SystemExit("pass the admin token: -e ENGINE_TOKEN=...")
+
+    async with ZabbixClient(settings.engine_url) as client:
+        async def export(kind: str, ids: list[str]) -> str:
+            return await client.call(
+                "configuration.export", {"options": {kind: ids}, "format": "yaml"}, token=admin
+            )
+
+        if args.upstream:
+            found = await client.call(
+                "template.get",
+                {"output": ["templateid", "host"], "filter": {"host": [args.upstream]}},
+                token=admin,
+            )
+            if not found:
+                raise SystemExit(f"template {args.upstream!r} not found")
+            _write(UPSTREAM / _filename(args.upstream), await export("templates", [found[0]["templateid"]]))
+            return
+
+        templates = await client.call(
+            "template.get",
+            {"output": ["templateid", "host"], "search": {"host": TEMPLATE_PREFIX}, "startSearch": True},
+            token=admin,
+        )
+        for t in templates:
+            _write(OURS / "templates" / _filename(t["host"]), await export("templates", [t["templateid"]]))
+
+        names = [d.technical_name for d in load_inventory()]
+        hosts = await client.call(
+            "host.get", {"output": ["hostid", "host"], "filter": {"host": names}}, token=admin
+        )
+        for h in hosts:
+            _write(OURS / "hosts" / _filename(h["host"]), await export("hosts", [h["hostid"]]))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())</pre>
+
+<h4>รัน</h4>
+<pre># ดูชื่อ template ที่มีอยู่ใน instance ก่อน เพราะชื่อเปลี่ยนได้ระหว่าง version
+(engine template.get @{ output = @('host'); search = @{ host = @('Cisco IOS','ICMP') }; searchByAny = $true }).host
+# คาดหวัง (7.0): Cisco IOS by SNMP / ICMP Ping
+
+nw provisioning.export --upstream "Cisco IOS by SNMP"
+nw provisioning.export --upstream "ICMP Ping"</pre>
+
+<h4>ตรวจว่าผ่าน (ผลจริง 12 ต.ค.)</h4>
+<pre>Get-Content templates\upstream\cisco-ios-by-snmp.yaml -TotalCount 3
+# zabbix_export:
+#   version: '7.0'
+#   template_groups:
+
+nw provisioning.export --upstream "Cisco IOS by SNMP"
+# unchanged templates/upstream/cisco-ios-by-snmp.yaml     (2306 บรรทัด)
+nw provisioning.export --upstream "ICMP Ping"
+# unchanged templates/upstream/icmp-ping.yaml             (120 บรรทัด)</pre>
+<p>Instance นี้มี template Cisco 3 ตัว: <code>Cisco IOS by SNMP</code>, <code>Cisco IOS prior to 12.0_3_T by SNMP</code> และ <code>Cisco IOS versions 12.0_3_T-12.2_3.5 by SNMP</code>
+ตัวที่ใช้คือ <code>Cisco IOS by SNMP</code> ส่วนอีกสองตัวสำหรับ IOS รุ่นเก่ามาก</p>
+
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul>
+<li>รัน <code>nw provisioning.export</code> แบบไม่มี <code>--upstream</code> ก่อนจะมี <code>inventory.csv</code> ทำให้ขึ้น <code>FileNotFoundError</code></li>
+<li>ดาวน์โหลด YAML จาก GitHub ของ Zabbix แทนการ export จาก instance ของเรา ผิด §5 และ version อาจไม่ตรงกับ engine</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>5. ขั้น 2.2 — Clone template แล้วใส่ tag (UI)</h2>
+<p><b>เป้าหมาย:</b> ไม่แก้ template upstream (§9) แต่ clone มาเป็นของเรา แล้วใส่ tag <code>metric</code> (ชื่อ metric ของเรา)
+กับ tag <code>netwatch=reachability</code> (ใช้ทำ dependency) จากนั้นตั้ง interval ของ throughput เป็น 60s</p>
+
+<h3>Cisco</h3>
+<ol>
+<li>ไปที่ <b>Data collection → Templates → Cisco IOS by SNMP</b> แล้วกด <b>Clone</b> (ล่างสุดของฟอร์ม)</li>
+<li>ตั้ง Template name เป็น <code>NetWatch Cisco IOS by SNMP</code> และ Template groups เป็น <code>Templates/NetWatch</code> แล้วกด Add</li>
+<li>ใส่ tag <code>metric</code> (เปิด item หรือ prototype แล้วไปที่ tab <b>Tags</b>):</li>
+</ol>
+<table>
+<tr><th>ที่ไหน</th><th>Item / prototype (ชื่อจริงใน 7.0.29)</th><th>Tag <code>metric</code> =</th></tr>
+<tr><td>Discovery rules → <b>Network interfaces discovery</b> → Item prototypes</td><td><code>Interface {#IFNAME}({#IFALIAS}): Bits received</code></td><td><code>if_in_bps:{#IFNAME}</code></td></tr>
+<tr><td>〃</td><td><code>…: Bits sent</code></td><td><code>if_out_bps:{#IFNAME}</code></td></tr>
+<tr><td>〃</td><td><code>…: Inbound packets with errors</code></td><td><code>if_in_errors:{#IFNAME}</code></td></tr>
+<tr><td>〃</td><td><code>…: Outbound packets with errors</code></td><td><code>if_out_errors:{#IFNAME}</code></td></tr>
+<tr><td>〃</td><td><code>…: Inbound packets discarded</code></td><td><code>if_in_discards:{#IFNAME}</code></td></tr>
+<tr><td>〃</td><td><code>…: Outbound packets discarded</code></td><td><code>if_out_discards:{#IFNAME}</code></td></tr>
+<tr><td>〃</td><td><code>…: Operational status</code></td><td><code>if_oper_status:{#IFNAME}</code></td></tr>
+<tr><td>〃</td><td><code>…: Speed</code></td><td><code>if_speed:{#IFNAME}</code></td></tr>
+<tr><td>Discovery rules → <b>CPU Discovery</b> → Item prototypes</td><td><code>#{#SNMPINDEX}: CPU utilization</code></td><td><code>cpu_util:{#SNMPINDEX}</code></td></tr>
+<tr><td>Discovery rules → <b>Memory Discovery</b> → Item prototypes</td><td><code>{#SNMPVALUE}: Memory utilization</code></td><td><code>mem_util:{#SNMPVALUE}</code></td></tr>
+<tr><td>Items</td><td><code>Uptime (network)</code></td><td><code>uptime</code></td></tr>
+<tr><td>Items</td><td><code>ICMP ping</code> / <code>ICMP response time</code> / <code>ICMP loss</code></td><td><code>icmp_ping</code> / <code>icmp_rtt</code> / <code>icmp_loss</code></td></tr>
+</table>
+<div class="note">ชื่อ item ใน template จริงมี <code>({#IFALIAS})</code> อยู่ด้วย ซึ่งก็คือ description ของพอร์ต นี่คือเหตุผลที่ต้องใช้ tag <code>metric</code> ไม่ใช้ชื่อ item (ขั้น 2.3)</div>
+<ol start="4">
+<li><b>Trigger reachability:</b> ใส่ tag <code>netwatch</code> = <code>reachability</code> ที่ <b><code>Cisco IOS: Unavailable by ICMP ping</code></b> (อยู่ใต้ item <code>ICMP ping</code>) ตัวเดียว
+<b>ไม่ใช่</b> <code>No SNMP data collection</code> เพราะใน template จริง <code>No SNMP data collection</code> depend on <code>Unavailable by ICMP ping</code> อยู่แล้ว ICMP จึงเป็นต้นของสายนี้
+(ตรวจแล้ว 12 ต.ค.: <code>trigger.get … selectDependencies</code> → No SNMP data collection depends on 21612 "Unavailable by ICMP ping")</li>
+<li><b>Poll interval (§9): ไม่ต้องแก้</b> template 7.0.29 ใช้ master item แบบ walk <code>net.if.walk</code> ที่ <b>delay 1m</b> อยู่แล้ว (prototype ทุกตัวเป็น dependent จึงมี delay 0)
+OID ใน walk มี <code>1.3.6.1.2.1.31.1.1.1.6</code> / <code>.10</code> (ifHCInOctets/ifHCOutOctets ซึ่งเป็น 64-bit) และ prototype Bits received/sent มี preprocessing <code>Change per second</code> + <code>Custom multiplier 8</code> ครบแล้ว</li>
+<li><b>(ไม่บังคับ)</b> disable item <code>SNMP traps (fallback)</code> ใน clone เพราะเรายังไม่ใช้ SNMP trap (§2)</li>
+</ol>
+
+<h3>ICMP (AP ระหว่างรอ decision #1)</h3>
+<p>Clone <code>ICMP Ping</code> เป็น <code>NetWatch ICMP Ping</code> แล้วใส่ tag ดังนี้</p>
+<ul>
+<li>item <code>ICMP ping</code> → <code>metric</code> = <code>icmp_ping</code></li>
+<li>item <code>ICMP response time</code> → <code>metric</code> = <code>icmp_rtt</code></li>
+<li>item <code>ICMP loss</code> → <code>metric</code> = <code>icmp_loss</code></li>
+<li>trigger <code>Unavailable by ICMP ping</code> → <code>netwatch</code> = <code>reachability</code></li>
+</ul>
+
+<h4>Export และตรวจว่าผ่าน</h4>
+<pre>nw provisioning.export
+# created templates/netwatch/templates/netwatch-cisco-ios-by-snmp.yaml
+# created templates/netwatch/templates/netwatch-icmp-ping.yaml
+Select-String "tag: metric" templates\netwatch\templates\*.yaml | Group-Object Filename | Select-Object Count, Name
+# Count Name
+# ----- ----
+#    14 netwatch-cisco-ios-by-snmp.yaml
+#     3 netwatch-icmp-ping.yaml
+git diff --no-index templates/upstream/cisco-ios-by-snmp.yaml `
+  templates/netwatch/templates/netwatch-cisco-ios-by-snmp.yaml | Select-Object -First 80
+# diff ต้องมีแค่ ชื่อ, uuid, tag ที่เพิ่ม และ interval ที่แก้</pre>
+<p>ขั้นนี้ต้องมี <code>inventory.csv</code> (2.4) ก่อน แม้จะมีแค่บรรทัด header ก็ได้</p>
+
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul>
+<li>แก้ template upstream ตรงๆ แทนที่จะแก้ clone</li>
+<li>ใส่ tag ที่ <b>item ที่ discover มาแล้ว</b> แทนที่จะใส่ที่ <b>prototype</b> ผลคือ LLD รอบถัดไปจะเขียนทับ</li>
+<li>ใส่ <code>{#IFALIAS}</code> ไว้ใน tag <code>metric</code> ซึ่งทำให้ปัญหาที่พยายามแก้กลับมาอีก</li>
+<li>มี trigger ที่ tag <code>netwatch=reachability</code> มากกว่าหนึ่งตัว ทำให้ <code>provision.py</code> ข้ามการทำ dependency</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>6. ขั้น 2.3 — Mapper อ่านชื่อ metric จาก tag</h2>
+<p><b>เป้าหมาย:</b> ชื่อ metric ต้องคงที่ แม้ชื่อ item หรือ description ของพอร์ตจะเปลี่ยน</p>
+<p><b>ไฟล์:</b> <code>backend/app/zabbix/mapper.py</code> เพิ่มหลัง <code>_IF_UNAVAILABLE = "2"</code></p>
+<pre># Item tag that carries OUR metric name (set in templates/netwatch/). The push
+# never carries the item key, and display names embed the port description,
+# which the customer may edit on the switch.
+_METRIC_TAG = "metric"</pre>
+<p>เพิ่มฟังก์ชันใต้ <code># -- Connector lines ---</code></p>
+<pre>def metric_name(line: ValueLine) -> str:
+    """The item's "metric" tag if it has one, else its display name."""
+    for t in line.item_tags:
+        if t.tag == _METRIC_TAG and t.value:
+            return t.value
+    return line.name</pre>
+<p>ใน <code>metric_from_value()</code> เปลี่ยน <code>metric=line.name,</code> เป็น <code>metric=metric_name(line),</code></p>
+
+<p><b>Test:</b> <code>backend/tests/test_mapper_adapter.py</code></p>
+<pre>from app.zabbix.connector_schema import HostRef, Tag, ValueLine
+
+
+def test_metric_name_prefers_metric_tag() -> None:
+    line = ValueLine(
+        host=HostRef(host="CORE-SW-01", name="Core Switch 01"),
+        item_tags=[Tag(tag="component", value="network"), Tag(tag="metric", value="if_in_bps:Gi1/0/1")],
+        itemid=1,
+        name="Interface Gi1/0/1(Uplink): Bits received",
+        clock=1791395275,
+        value=1500.0,
+        type=0,
+    )
+    point = mapper.metric_from_value(line)
+    assert point is not None and point.metric == "if_in_bps:Gi1/0/1"
+
+    untagged = mapper.metric_from_value(line.model_copy(update={"item_tags": []}))
+    assert untagged is not None and untagged.metric == "Interface Gi1/0/1(Uplink): Bits received"</pre>
+
+<h4>ตรวจว่าผ่าน</h4>
+<pre>cd backend; .venv\Scripts\python -m pytest -q; cd ..
+# 56 passed (55 เดิม + 1 ใหม่)
+boundary
+# check-boundary: OK
+docker compose -f backend/docker-compose.dev.yml up -d --build   # ให้ container ได้ mapper ใหม่</pre>
+
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul>
+<li>เขียนฟังก์ชันนี้ไว้ใน <code>services/</code> ผิด §4 เพราะ <code>item_tags</code> เป็นรูปแบบของ engine ต้องอยู่ใน <code>zabbix/mapper.py</code> เท่านั้น</li>
+<li>ลืม <code>--build</code> ทำให้ backend ที่รันอยู่ยังใช้ชื่อ item อยู่</li>
+<li>Test เดิม <code>test_decoder_keeps_numeric_values_only</code> ต้องยังผ่าน เพราะ probe ใน lab ไม่มี tag <code>metric</code> จึงใช้ชื่อ item ตามเดิม</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>7. ขั้น 2.4 — inventory, catalog, provision, verify</h2>
+
+<h3><code>provisioning/inventory.csv</code></h3>
+<p>เริ่มที่ <b>ตัวเดียว</b> ตาม §9 และใส่ IP จริง</p>
+<pre># technical_name = device_ref (ADR 0006): permanent. Renaming it starts a new device.
+# role: core | access | ap        parent: technical_name of the uplink device (empty for core)
+# No credentials here, ever: SNMPv3 lives in the engine's global secret macros.
+technical_name,display_name,role,tenant,site,address,model,parent
+CORE-SW-01,Core Switch 01,core,acme-hq,HQ,10.10.0.1,Cisco C9300-48P,</pre>
+
+<h3><code>provisioning/catalog.py</code></h3>
+<pre>"""What each inventory role becomes in the engine.
+
+Shared vocabulary with backend/app/zabbix/mapper.py:
+- host tag "role" values must be keys of mapper._KIND (core, access, ap, server)
+- host tag "site" becomes Device.site
+- item tag "metric" is our metric name (mapper.metric_name)
+"""
+
+from __future__ import annotations
+
+import csv
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+INVENTORY = Path(__file__).with_name("inventory.csv")
+
+TEMPLATE_PREFIX = "NetWatch "
+METRIC_TAG = "metric"
+REACHABILITY_TAG = ("netwatch", "reachability")
+SNMP_MACROS = ("{$SNMPV3.USER}", "{$SNMPV3.AUTH}", "{$SNMPV3.PRIV}")
+
+# Engine numbering. Interface type: 1 agent, 2 SNMP.
+IF_AGENT = 1
+IF_SNMP = 2
+# SNMP interface details on 7.0: securitylevel 2 = authPriv, authprotocol
+# 1 = SHA1, privprotocol 1 = AES128. Must match the switch (step 2.5).
+SNMP_DETAILS: dict[str, Any] = {
+    "version": 3,
+    "bulk": 1,
+    "securityname": SNMP_MACROS[0],
+    "securitylevel": 2,
+    "authprotocol": 1,
+    "authpassphrase": SNMP_MACROS[1],
+    "privprotocol": 1,
+    "privpassphrase": SNMP_MACROS[2],
+}
+# hostgroup_rights permission: 2 = read-only.
+READ = 2
+
+
+@dataclass(frozen=True)
+class Role:
+    templates: tuple[str, ...]
+    interface_type: int
+
+
+ROLES: dict[str, Role] = {
+    "core": Role(("NetWatch Cisco IOS by SNMP",), IF_SNMP),
+    "access": Role(("NetWatch Cisco IOS by SNMP",), IF_SNMP),
+    # Aruba waits on decision #1 (AOS-8 vs AOS-10). Reachability only until then.
+    "ap": Role(("NetWatch ICMP Ping",), IF_AGENT),
+}
+
+TENANTS: dict[str, str] = {
+    "acme-hq": "ACME HQ",
+    "branch-co": "Branch Co",
+}
+
+
+@dataclass(frozen=True)
+class Device:
+    technical_name: str
+    display_name: str
+    role: str
+    tenant: str
+    site: str
+    address: str
+    model: str
+    parent: str
+
+    @property
+    def group(self) -> str:
+        # The host group IS the tenancy boundary (ADR 0004): never shared by two tenants.
+        return f"tenant/{self.tenant}/{self.site}"
+
+    def interface(self) -> dict[str, Any]:
+        kind = ROLES[self.role].interface_type
+        iface: dict[str, Any] = {"type": kind, "main": 1, "useip": 1, "ip": self.address, "dns": ""}
+        if kind == IF_SNMP:
+            return {**iface, "port": "161", "details": dict(SNMP_DETAILS)}
+        # ICMP needs an IP to ping; the agent interface is only its carrier.
+        return {**iface, "port": "10050"}
+
+
+def load_inventory(path: Path = INVENTORY) -> list[Device]:
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(line for line in f if not line.startswith("#")))
+    devices = [Device(**{k: (v or "").strip() for k, v in row.items()}) for row in rows]
+
+    names = [d.technical_name for d in devices]
+    errors = [f"duplicate technical_name {n}" for n in sorted({n for n in names if names.count(n) > 1})]
+    for d in devices:
+        if d.role not in ROLES:
+            errors.append(f"{d.technical_name}: unknown role {d.role!r}")
+        if d.tenant not in TENANTS:
+            errors.append(f"{d.technical_name}: unknown tenant {d.tenant!r} (add it to TENANTS)")
+        if d.parent and d.parent not in names:
+            errors.append(f"{d.technical_name}: parent {d.parent!r} is not in the inventory")
+        if not d.address or not d.site:
+            errors.append(f"{d.technical_name}: address and site are required")
+    if errors:
+        raise SystemExit("inventory.csv:\n  " + "\n  ".join(errors))
+    return devices</pre>
+<ul>
+<li>ค่า <code>role</code> ต้องตรงกับ key ใน <code>mapper._KIND</code> (<code>core</code>, <code>access</code>, <code>ap</code>) ไม่อย่างนั้น portal จะแสดงเป็น <code>other</code></li>
+<li>Host group สร้างจาก tenant และ site อัตโนมัติ (<code>tenant/acme-hq/HQ</code>) จึงไม่มีทางที่สอง tenant จะใช้ group เดียวกันโดยไม่ตั้งใจ</li>
+<li>ตัวเลข <code>authprotocol</code> / <code>privprotocol</code> เป็นของ 7.0 ให้ตรวจด้วย <code>hostinterface.get</code> หลัง provision</li>
+</ul>
+
+<h3><code>provisioning/provision.py</code></h3>
+<pre>"""Push provisioning/inventory.csv into the engine and our store. Idempotent.
+
+    nw provisioning.provision
+
+  1. templates    import templates/netwatch/templates/*.yaml where they differ
+  2. host groups  tenant/&lt;tenant&gt;/&lt;site&gt;
+  3. hosts        create or update name, group, tags, templates, interface
+  4. dependencies a device's reachability trigger depends on its parent's
+  5. tenants      user group (read on its groups) + user + API token
+  6. ADR 0004     each tenant token sees exactly its inventory hosts -> PASS/FAIL
+
+A second run with no inventory change must print "0 changes".
+"""
+
+from __future__ import annotations
+
+import asyncio
+import secrets
+from pathlib import Path
+from typing import Any
+
+from app.config import get_settings
+from app.container import Container, build_container
+from app.domain.models import Tenant
+from app.zabbix.client import ZabbixAPIError, ZabbixClient
+from provisioning.catalog import READ, REACHABILITY_TAG, ROLES, TENANTS, Device, load_inventory
+
+ROOT = Path(__file__).resolve().parent.parent
+OUR_TEMPLATES = ROOT / "templates" / "netwatch" / "templates"
+USER_ROLE_ID = "1"  # built-in "User role" on 7.0 — check with role.get if unsure
+TOKEN_NAME = "netwatch-read"
+
+_UPSERT = {"createMissing": True, "updateExisting": True}
+# The YAML in git is the source of truth: what is not in it is removed from our templates.
+_SYNC = {**_UPSERT, "deleteMissing": True}
+IMPORT_RULES = {
+    "template_groups": _UPSERT,
+    "templates": _UPSERT,
+    "items": _SYNC,
+    "triggers": _SYNC,
+    "discoveryRules": _SYNC,
+    "graphs": _SYNC,
+    "valueMaps": _SYNC,
+    "templateDashboards": _SYNC,
+    "templateLinkage": {"createMissing": True},
+}
+
+
+class Run:
+    def __init__(self, client: ZabbixClient, admin: str) -> None:
+        self.client = client
+        self.admin = admin
+        self.changes = 0
+        self.errors = 0
+
+    async def call(self, method: str, params: Any) -> Any:
+        return await self.client.call(method, params, token=self.admin)
+
+    def changed(self, what: str) -> None:
+        self.changes += 1
+        print(f"  ~ {what}")
+
+    def failed(self, what: str) -> None:
+        # Keep going so one bad device does not hide the rest, but exit 1 at the end.
+        self.errors += 1
+        print(f"  ! {what}")
+
+
+# -- 1. templates ---------------------------------------------------------------
+async def import_templates(run: Run) -> None:
+    for path in sorted(OUR_TEMPLATES.glob("*.yaml")):
+        params = {"format": "yaml", "source": path.read_text(encoding="utf-8"), "rules": IMPORT_RULES}
+        if not await run.call("configuration.importcompare", params):
+            continue
+        await run.call("configuration.import", params)
+        run.changed(f"template imported from {path.name}")
+
+
+# -- 2. host groups -------------------------------------------------------------
+async def ensure_groups(run: Run, names: set[str]) -> dict[str, str]:
+    found = await run.call("hostgroup.get", {"output": ["groupid", "name"], "filter": {"name": sorted(names)}})
+    ids = {g["name"]: g["groupid"] for g in found}
+    for name in sorted(names - ids.keys()):
+        ids[name] = (await run.call("hostgroup.create", {"name": name}))["groupids"][0]
+        run.changed(f"host group {name}")
+    return ids
+
+
+# -- 3. hosts -------------------------------------------------------------------
+async def template_ids(run: Run, names: set[str]) -> dict[str, str]:
+    found = await run.call("template.get", {"output": ["templateid", "host"], "filter": {"host": sorted(names)}})
+    ids = {t["host"]: t["templateid"] for t in found}
+    if missing := names - ids.keys():
+        raise SystemExit(f"templates not in the engine: {sorted(missing)} (step 2.2)")
+    return ids
+
+
+def _same_interface(have: dict[str, Any], want: dict[str, Any]) -> bool:
+    if any(str(have[k]) != str(want[k]) for k in ("type", "ip", "port")):
+        return False
+    have_details = have.get("details") or {}
+    if isinstance(have_details, list):  # agent interfaces come back as []
+        have_details = {}
+    return all(str(have_details.get(k)) == str(v) for k, v in want.get("details", {}).items())
+
+
+async def ensure_hosts(
+    run: Run, devices: list[Device], groups: dict[str, str], templates: dict[str, str]
+) -> dict[str, str]:
+    found = await run.call("host.get", {
+        "output": ["hostid", "host", "name"],
+        "filter": {"host": [d.technical_name for d in devices]},
+        "selectHostGroups": ["groupid"],
+        "selectParentTemplates": ["templateid"],
+        "selectTags": ["tag", "value"],
+        "selectInterfaces": ["interfaceid", "type", "main", "ip", "port", "details"],
+    })
+    existing = {h["host"]: h for h in found}
+    ids: dict[str, str] = {}
+
+    for d in devices:
+        want = {
+            "name": d.display_name,
+            "groups": [{"groupid": groups[d.group]}],
+            "tags": [
+                {"tag": "role", "value": d.role},
+                {"tag": "site", "value": d.site},
+                {"tag": "model", "value": d.model},
+            ],
+            "templates": [{"templateid": templates[t]} for t in ROLES[d.role].templates],
+        }
+        iface = d.interface()
+        have = existing.get(d.technical_name)
+
+        if have is None:
+            created = await run.call("host.create", {"host": d.technical_name, **want, "interfaces": [iface]})
+            ids[d.technical_name] = created["hostids"][0]
+            run.changed(f"host {d.technical_name} created")
+            continue
+
+        hostid = ids[d.technical_name] = have["hostid"]
+        if (
+            have["name"] != want["name"]
+            or {g["groupid"] for g in have["hostgroups"]} != {g["groupid"] for g in want["groups"]}
+            or {(t["tag"], t["value"]) for t in have["tags"]} != {(t["tag"], t["value"]) for t in want["tags"]}
+            or {t["templateid"] for t in have["parentTemplates"]} != {t["templateid"] for t in want["templates"]}
+        ):
+            await run.call("host.update", {"hostid": hostid, **want})
+            run.changed(f"host {d.technical_name} updated")
+
+        main = next(
+            (i for i in have["interfaces"] if str(i["main"]) == "1" and str(i["type"]) == str(iface["type"])),
+            None,
+        )
+        if main is None:
+            raise SystemExit(f"{d.technical_name}: no main interface of type {iface['type']} (role changed? fix by hand)")
+        if not _same_interface(main, iface):
+            update = {k: iface[k] for k in ("ip", "port", "details") if k in iface}
+            await run.call("hostinterface.update", {"interfaceid": main["interfaceid"], **update})
+            run.changed(f"host {d.technical_name} interface updated")
+
+    return ids
+
+
+# -- 4. dependencies ------------------------------------------------------------
+async def reachability_trigger(run: Run, hostid: str, host: str) -> dict[str, Any] | None:
+    tag, value = REACHABILITY_TAG
+    found = await run.call("trigger.get", {
+        "hostids": [hostid],
+        "output": ["triggerid", "description"],
+        "tags": [{"tag": tag, "value": value, "operator": 1}],  # 1 = equals
+        "selectDependencies": ["triggerid"],
+    })
+    if len(found) != 1:
+        run.failed(f"{host}: expected 1 trigger tagged {tag}={value}, found {len(found)} (step 2.2)")
+        return None
+    return found[0]
+
+
+async def ensure_dependencies(run: Run, devices: list[Device], host_ids: dict[str, str]) -> None:
+    for d in devices:
+        if not d.parent:
+            continue
+        child = await reachability_trigger(run, host_ids[d.technical_name], d.technical_name)
+        parent = await reachability_trigger(run, host_ids[d.parent], d.parent)
+        if child is None or parent is None:
+            continue
+        have = [t["triggerid"] for t in child["dependencies"]]
+        if parent["triggerid"] in have:
+            continue
+        # 7.0 has no trigger.adddependencies (-32601). trigger.update replaces the
+        # whole list, so keep what is there; it works on template-inherited triggers.
+        deps = [{"triggerid": t} for t in [*have, parent["triggerid"]]]
+        try:
+            await run.call("trigger.update", {"triggerid": child["triggerid"], "dependencies": deps})
+        except ZabbixAPIError as exc:
+            run.failed(f"dependency {d.technical_name} -> {d.parent}: {exc}")
+            continue
+        run.changed(f"dependency {d.technical_name} -> {d.parent}")
+
+
+# -- 5. tenants -----------------------------------------------------------------
+async def _token_works(client: ZabbixClient, token: str) -> bool:
+    try:
+        await client.call("host.get", {"output": ["hostid"], "limit": 1}, token=token)
+    except ZabbixAPIError:
+        return False
+    return True
+
+
+async def ensure_tenant(run: Run, container: Container, tenant_id: str, groupids: list[str]) -> str:
+    rights = [{"id": g, "permission": READ} for g in groupids]
+    group_name = f"netwatch-{tenant_id}-readers"
+    username = f"netwatch-{tenant_id}-reader"
+
+    found = await run.call("usergroup.get", {
+        "output": ["usrgrpid"], "filter": {"name": [group_name]},
+        "selectHostGroupRights": ["id", "permission"],
+    })
+    if not found:
+        usrgrpid = (await run.call("usergroup.create", {"name": group_name, "hostgroup_rights": rights}))["usrgrpids"][0]
+        run.changed(f"user group {group_name}")
+    else:
+        usrgrpid = found[0]["usrgrpid"]
+        have = {(r["id"], str(r["permission"])) for r in found[0]["hostgroup_rights"]}
+        if have != {(r["id"], str(r["permission"])) for r in rights}:
+            await run.call("usergroup.update", {"usrgrpid": usrgrpid, "hostgroup_rights": rights})
+            run.changed(f"user group {group_name} rights")
+
+    found = await run.call("user.get", {"output": ["userid"], "filter": {"username": [username]}})
+    if found:
+        userid = found[0]["userid"]
+    else:
+        userid = (await run.call("user.create", {
+            "username": username,
+            # Nobody logs in with it: the API token is the only way in.
+            "passwd": secrets.token_urlsafe(24),
+            "roleid": USER_ROLE_ID,
+            "usrgrps": [{"usrgrpid": usrgrpid}],
+        }))["userids"][0]
+        run.changed(f"user {username}")
+
+    stored = await container.store.get_tenant(tenant_id)
+    if stored is not None and await _token_works(run.client, stored.engine_token):
+        token = stored.engine_token
+    else:
+        old = await run.call("token.get", {
+            "output": ["tokenid"], "userids": [userid], "filter": {"name": [TOKEN_NAME]},
+        })
+        if old:
+            await run.call("token.delete", [t["tokenid"] for t in old])
+        tokenid = (await run.call("token.create", {"name": TOKEN_NAME, "userid": userid}))["tokenids"][0]
+        token = (await run.call("token.generate", [tokenid]))[0]["token"]
+        run.changed(f"tenant {tenant_id}: new read token")
+
+    if stored is None or stored.engine_token != token or stored.name != TENANTS[tenant_id]:
+        await container.auth.add_tenant(Tenant(tenant_id, TENANTS[tenant_id], token))
+        print(f"  tenant {tenant_id!r} saved in our store (token encrypted; not printed)")
+    return token
+
+
+# -- 6. ADR 0004 ----------------------------------------------------------------
+async def adr_0004_check(run: Run, tenant_id: str, token: str, devices: list[Device]) -> bool:
+    expected = {d.technical_name for d in devices if d.tenant == tenant_id}
+    seen = {h["host"] for h in await run.client.call("host.get", {"output": ["host"]}, token=token)}
+    ok = seen == expected
+    detail = "" if ok else f" (sees {sorted(seen)}, expected {sorted(expected)})"
+    print(f"ADR 0004 check, tenant {tenant_id}: {'PASS' if ok else 'FAIL'}{detail}")
+    return ok
+
+
+async def main() -> int:
+    settings = get_settings()
+    admin = settings.engine_token
+    if not admin:
+        raise SystemExit("pass the admin token: -e ENGINE_TOKEN=...")
+    devices = load_inventory()
+
+    container = build_container(settings)
+    await container.start()
+    try:
+        async with ZabbixClient(settings.engine_url) as client:
+            run = Run(client, admin)
+            print("templates")
+            await import_templates(run)
+            print("host groups")
+            groups = await ensure_groups(run, {d.group for d in devices})
+            print("hosts")
+            templates = await template_ids(run, {t for d in devices for t in ROLES[d.role].templates})
+            host_ids = await ensure_hosts(run, devices, groups, templates)
+            print("dependencies")
+            await ensure_dependencies(run, devices, host_ids)
+            print("tenants")
+            all_ok = True
+            for tenant_id in sorted({d.tenant for d in devices}):
+                groupids = sorted({groups[d.group] for d in devices if d.tenant == tenant_id})
+                token = await ensure_tenant(run, container, tenant_id, groupids)
+                all_ok &amp;= await adr_0004_check(run, tenant_id, token, devices)
+    finally:
+        await container.stop()
+
+    print(f"{run.changes} changes" + (f", {run.errors} errors (lines with !)" if run.errors else ""))
+    return 0 if all_ok and not run.errors else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(main()))</pre>
+
+<h4>อธิบายจุดสำคัญ</h4>
+<ul>
+<li><b>Idempotent:</b> ทุกขั้นอ่านสถานะปัจจุบันก่อน แล้วเขียนเฉพาะส่วนที่ต่างจากที่ต้องการ <code>run.changed()</code> นับการเปลี่ยนแปลง ครั้งที่สองจึงต้องได้ <code>0 changes</code></li>
+<li><b>Interface:</b> แก้ด้วย <code>hostinterface.update</code> ไม่ส่ง <code>interfaces</code> ผ่าน <code>host.update</code> เพราะแบบหลังจะลบแล้วสร้างใหม่ ซึ่งชนกับ item ที่ผูกอยู่</li>
+<li><b>Token:</b> ใช้ token เดิมใน store ถ้ายังใช้ได้ (ต่างจาก <code>lab_tenant.py</code> ที่สร้างใหม่ทุกรอบ) และไม่เคยพิมพ์ token ออกมา</li>
+<li><b>ADR 0004:</b> ตรวจทุกรอบว่า token ของ tenant เห็นเฉพาะ host ใน inventory ของตัวเอง ถ้า FAIL ให้ exit code เป็น 1</li>
+<li>Dependency ใส่ด้วย <code>trigger.update</code> + <code>dependencies</code> (7.0 ไม่มี <code>trigger.adddependencies</code> แล้ว ตรวจกับ 7.0.29 เมื่อ 15 ต.ค.) ถ้าใส่ไม่ได้ script จะพิมพ์ <code>!</code> ทำต่อจนจบ แล้ว exit 1</li>
+</ul>
+
+<h3><code>provisioning/verify.py</code></h3>
+<pre>"""Check the engine against provisioning/inventory.csv. Read-only.
+
+    nw provisioning.verify
+
+Per device: in the engine, SNMP interface available, no unsupported items,
+items tagged "metric" exist, exactly one reachability trigger.
+Also: global SNMPv3 macros exist, no stray hosts in tenant groups. Exit 1 on FAIL.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from app.config import get_settings
+from app.zabbix.client import ZabbixClient
+from provisioning.catalog import IF_SNMP, METRIC_TAG, REACHABILITY_TAG, SNMP_MACROS, load_inventory
+
+
+async def main() -> int:
+    settings = get_settings()
+    admin = settings.engine_token
+    if not admin:
+        raise SystemExit("pass the admin token: -e ENGINE_TOKEN=...")
+    devices = load_inventory()
+    failed = 0
+
+    async with ZabbixClient(settings.engine_url) as client:
+        async def call(method: str, params: Any) -> Any:
+            return await client.call(method, params, token=admin)
+
+        macros = {m["macro"] for m in await call("usermacro.get", {"output": ["macro"], "globalmacro": True})}
+        missing = sorted(set(SNMP_MACROS) - macros)
+        print(f"{'global macros':<16} {'PASS' if not missing else 'FAIL missing ' + ', '.join(missing)}")
+        failed += bool(missing)
+
+        hosts = {h["host"]: h for h in await call("host.get", {
+            "output": ["hostid", "host"],
+            "filter": {"host": [d.technical_name for d in devices]},
+            "selectInterfaces": ["type", "available", "error"],
+        })}
+        tag, value = REACHABILITY_TAG
+        for d in devices:
+            h = hosts.get(d.technical_name)
+            if h is None:
+                print(f"{d.technical_name:<16} FAIL not in the engine (run provision)")
+                failed += 1
+                continue
+            problems: list[str] = []
+            for i in h["interfaces"]:
+                if str(i["type"]) == str(IF_SNMP) and str(i["available"]) != "1":
+                    problems.append(f"SNMP interface available={i['available']} {i['error']}".rstrip())
+            unsupported = await call("item.get", {
+                "hostids": [h["hostid"]], "output": ["name", "error"], "filter": {"state": 1, "status": 0},
+            })
+            problems += [f"unsupported: {it['name']}: {it['error']}" for it in unsupported[:5]]
+            if len(unsupported) > 5:
+                problems.append(f"... and {len(unsupported) - 5} more unsupported")
+            tagged = int(await call("item.get", {
+                "hostids": [h["hostid"]], "countOutput": True,
+                "tags": [{"tag": METRIC_TAG, "operator": 4}],  # 4 = exists
+            }))
+            if tagged == 0:
+                problems.append(f"no items tagged {METRIC_TAG}: nothing will reach our store")
+            reach = int(await call("trigger.get", {
+                "hostids": [h["hostid"]], "countOutput": True,
+                "tags": [{"tag": tag, "value": value, "operator": 1}],
+            }))
+            if reach != 1:
+                problems.append(f"{reach} triggers tagged {tag}={value}, expected 1")
+            print(f"{d.technical_name:<16} {'PASS' if not problems else 'FAIL'}  ({tagged} metric items)")
+            for p in problems:
+                print(f"    - {p}")
+            failed += bool(problems)
+
+        groups = await call("hostgroup.get", {"output": ["groupid"], "search": {"name": "tenant/"}, "startSearch": True})
+        if groups:
+            in_groups = {h["host"] for h in await call("host.get", {
+                "output": ["host"], "groupids": [g["groupid"] for g in groups],
+            })}
+            stray = sorted(in_groups - {d.technical_name for d in devices})
+            print(f"{'stray hosts':<16} {'PASS' if not stray else 'FAIL ' + ', '.join(stray)}")
+            failed += bool(stray)
+
+    print("verify: " + ("PASS" if not failed else f"FAIL ({failed})"))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(main()))</pre>
+<div class="rule"><b>กฎ §3:</b> <code>verify.py</code> ใช้แค่ <code>host.get</code>, <code>item.get</code> (ดูแค่ state และ error), <code>trigger.get</code> และ <code>usermacro.get</code>
+ไม่ใช้ <code>history.get</code> และไม่อ่าน <code>lastvalue</code></div>
+
+<!-- ============================================================ -->
+<h2>8. ขั้น 2.5 — Core switch ตัวแรก</h2>
+<p><b>เป้าหมาย:</b> poll Cisco ตัวจริงด้วย SNMPv3 authPriv ให้ได้หนึ่งตัวก่อน แล้วจึง rollout</p>
+
+<h3>Config บน Cisco (<code>CORE-SW-01</code>)</h3>
+<p>Syntax ต่างกันตาม IOS version ด้านล่างนี้ใช้ได้กับ IOS 15.x และ IOS-XE 16.x/17.x</p>
+<pre>conf t
+ ip access-list standard NETWATCH-SNMP
+  permit host &lt;IP ของเครื่องที่รัน Docker&gt;
+  deny   any log
+ exit
+ snmp-server view NETWATCH-RO iso included
+ snmp-server group NETWATCH-RO v3 priv read NETWATCH-RO access NETWATCH-SNMP
+ snmp-server user netwatch-poll NETWATCH-RO v3 auth sha &lt;AUTH-PASS&gt; priv aes 128 &lt;PRIV-PASS&gt;
+ snmp-server ifindex persist
+ interface GigabitEthernet1/0/1
+  load-interval 30
+ end
+write memory</pre>
+<ul>
+<li><code>&lt;AUTH-PASS&gt;</code> และ <code>&lt;PRIV-PASS&gt;</code> ต้องตรงกับ <code>{$SNMPV3.AUTH}</code> / <code>{$SNMPV3.PRIV}</code></li>
+<li><code>sha</code> + <code>aes 128</code> ต้องตรงกับ <code>authprotocol: 1</code> / <code>privprotocol: 1</code> ใน <code>catalog.py</code> ถ้าจะใช้ <code>sha-2 256</code> / <code>aes 256</code> (IOS-XE ใหม่รองรับ แต่ 2960X ไม่รองรับ) ให้แก้ทั้งสองฝั่งเป็น <code>3</code> / <code>3</code></li>
+<li><code>load-interval 30</code> ใส่เฉพาะพอร์ตที่จะเทียบค่าใน 2.6</li>
+</ul>
+
+<h4>ตรวจบนสวิตช์</h4>
+<pre>show snmp user              ! User name: netwatch-poll / Authentication Protocol: SHA / Privacy Protocol: AES128
+show snmp group             ! groupname: NETWATCH-RO  security model:v3 priv  readview: NETWATCH-RO  access-list: NETWATCH-SNMP
+show snmp mib ifmib ifindex GigabitEthernet1/0/1   ! Ifindex = &lt;ตัวเลข&gt;</pre>
+
+<h3>Provision ตัวแรก</h3>
+<pre>nw provisioning.provision
+# templates
+# host groups
+#   ~ host group tenant/acme-hq/HQ
+# hosts
+#   ~ host CORE-SW-01 created
+# dependencies
+# tenants
+#   ~ user group netwatch-acme-hq-readers
+#   ~ user netwatch-acme-hq-reader
+#   ~ tenant acme-hq: new read token
+#   tenant 'acme-hq' saved in our store (token encrypted; not printed)
+# ADR 0004 check, tenant acme-hq: PASS
+# 5 changes
+
+nw provisioning.provision
+# ADR 0004 check, tenant acme-hq: PASS
+# 0 changes</pre>
+<p>ใน UI ไปที่ host <code>CORE-SW-01</code> → Discovery rules แล้วกด <b>Execute now</b> ที่ "Network interfaces discovery" (ค่า default คือรอ 1 ชั่วโมง) จากนั้นรอ 2–3 นาที</p>
+<pre>nw provisioning.verify
+# global macros    PASS
+# CORE-SW-01       PASS  (4xx metric items)
+# stray hosts      PASS
+# verify: PASS
+
+nw provisioning.export      # created templates/netwatch/hosts/core-sw-01.yaml</pre>
+
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul>
+<li><b>ACL ใส่ IP ของ container:</b> SNMP ออกผ่าน NAT ของ Docker สวิตช์จึงเห็น IP ของเครื่องที่รัน Docker (บน Docker Desktop คือ IP ของเครื่อง Windows)
+ให้ตรวจด้วย <code>show access-lists NETWATCH-SNMP</code> ซึ่ง match counter ของบรรทัด permit ต้องเพิ่มขึ้น</li>
+<li><b><code>show running-config</code> ไม่แสดง <code>snmp-server user</code>:</b> IOS ซ่อนไว้โดยตั้งใจ ให้ใช้ <code>show snmp user</code></li>
+<li><b><code>available=2 … Timeout</code>:</b> สาเหตุมักเป็น ACL, protocol ไม่ตรง หรือ passphrase ผิด ให้กด <b>Test</b> ที่ item <code>SNMP agent availability</code> ข้อความ error จะช่วยแยกระหว่าง <code>authorizationError</code> กับ timeout</li>
+<li><b>ไม่ได้ตั้ง ifindex persist:</b> reboot แล้วกราฟของพอร์ตสลับกัน บน IOS-XE ใหม่บางรุ่นเปิดเป็น default และคำสั่งนี้ไม่มี ให้ใช้ <code>show snmp mib ifmib ifindex</code> ยืนยัน</li>
+<li><b>มี unsupported item:</b> ให้ disable item นั้นใน clone แล้ว export ใหม่ อย่าปล่อยให้ FAIL ค้าง</li>
+<li><b><code>configuration.importcompare</code>: Method not found:</b> method นี้มีตั้งแต่ 6.0 ให้ตรวจ version ด้วย <code>apiinfo.version</code></li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>9. ขั้น 2.6 — เทียบค่ากับ <code>show interfaces</code></h2>
+<p><b>เป้าหมาย:</b> §9 "ห้ามเชื่อ template ต้องเทียบกับ CLI จริง" โดยเทียบผ่าน <b>store ของเรา</b> ซึ่งเป็นเส้นทางเดียวกับที่ portal ใช้</p>
+<pre>docker compose -f backend/docker-compose.dev.yml exec -it backend python -m app.auth.cli add-user somchai acme-hq
+
+portal-login somchai
+# password for somchai: ************
+# logged in as somchai
+portal /api/devices/CORE-SW-01/latest | Where-Object metric -eq 'if_in_bps:Gi1/0/1'</pre>
+<p>ในเวลาเดียวกัน บนสวิตช์:</p>
+<pre>show interfaces GigabitEthernet1/0/1 | include rate
+!   30 second input rate 41250000 bits/sec, 5120 packets/sec</pre>
+
+<div class="pass"><b>ผ่านเมื่อ:</b> ถ้า traffic นิ่ง ค่าต้องต่างกันไม่เกินประมาณ ±10% (Zabbix ใช้ delta 60s ส่วน IOS ใช้ค่าเฉลี่ย 30s) ทดสอบ 3 พอร์ต รวม uplink ที่ traffic สูงด้วย</div>
+
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul>
+<li><b>ต่างกัน 8 เท่า:</b> item เป็น bytes ไม่ใช่ bits ให้ตรวจว่า prototype มี preprocessing <code>Custom multiplier 8</code></li>
+<li><b>ค่าตกเป็นศูนย์หรือติดลบเป็นระยะบน uplink:</b> ใช้ counter 32-bit (<code>ifInOctets</code>) ซึ่ง wrap ในไม่กี่วินาทีที่ 1G/10G ต้องใช้ <code>ifHCInOctets</code></li>
+<li><b>ไม่เจอค่า:</b> <code>{#IFNAME}</code> มาจาก ifName (OID <code>1.3.6.1.2.1.31.1.1.1.1</code>) ซึ่งบน IOS ปกติเป็นชื่อย่อ (<code>Gi1/0/1</code>) ส่วนชื่อเต็ม <code>GigabitEthernet1/0/1</code> อยู่ที่ ifDescr ให้ดูชื่อจริงด้วย <code>(portal /api/devices/CORE-SW-01/latest).metric</code> และใช้ <code>-eq</code> ไม่ใช่ <code>-like '…*'</code> เพราะ <code>Gi1/0/1*</code> จะจับ <code>Gi1/0/10</code>–<code>19</code> มาด้วย</li>
+<li><b><code>run portal-login &lt;user&gt; first</code>:</b> session เก็บอยู่ใน PowerShell ตัวที่ login เท่านั้น ถ้าเปิดหน้าต่างใหม่ต้อง login ใหม่</li>
+<li><b>เทียบด้วย <code>history.get</code>:</b> ผิด §3 ต้องเทียบผ่าน store ของเราเท่านั้น</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>10. ขั้น 2.7 — Tag filter ของ Connector</h2>
+<p><b>เป้าหมาย:</b> ส่งเข้ามาเฉพาะค่าที่มีชื่อ metric ของเรา ไม่ต้องส่งทุก item ของทุกพอร์ต</p>
+<p>ไปที่ <b>Administration → General → Connectors</b> แล้วเปิด connector ของ values (ใน Phase 1 ชื่อ <code>acme-values</code>)</p>
+<ul>
+<li>Tag filter: <code>And/Or</code>, tag <code>metric</code>, operator <b>Exists</b></li>
+<li>Connector ของ <b>events</b> ไม่ต้องกรอง เพราะต้องได้ problem ทุกตัว</li>
+</ul>
+<h4>ตรวจว่าผ่าน</h4>
+<pre>engine connector.get @{ output = @('name','data_type'); selectTags = 'extend' } | ConvertTo-Json -Depth 5
+# connector values (data_type "0"): tags [{"tag":"metric","operator":"12","value":""}]
+# (12 = exists บน 7.0 ถ้า version อื่นตัวเลขต่างไป ให้ยึดที่ UI)
+(docker compose -f backend/docker-compose.dev.yml logs --since 2m backend | Select-String "POST /hooks/values").Count
+# ยังมี request เข้ามา แต่ batch เล็กลงชัดเจน</pre>
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul><li>ไปตั้ง filter ที่ connector ของ events ด้วย ผลคือ problem จาก trigger ที่ไม่มี tag <code>metric</code> (เช่น <code>No SNMP data collection</code>) จะไม่มาถึง portal</li></ul>
+
+<!-- ============================================================ -->
+<h2>11. ขั้น 2.8 — Rollout และ dependent trigger</h2>
+<p><b>เป้าหมาย:</b> เพิ่มอุปกรณ์ทั้งหมดด้วยการแก้ CSV อย่างเดียว และเมื่อ core ล่ม ต้องได้ alert ตัวเดียว (§9)</p>
+<pre>ACC-SW-01,Access Switch 01 (Floor 1),access,acme-hq,HQ,10.10.1.11,Cisco C2960X-48TS,CORE-SW-01
+ACC-SW-02,Access Switch 02 (Floor 2),access,acme-hq,HQ,10.10.1.12,Cisco C2960X-48TS,CORE-SW-01
+AP-01,AP Lobby,ap,acme-hq,HQ,10.10.2.21,Aruba AP-515,ACC-SW-01</pre>
+<p>Config SNMP บน access switch แต่ละตัวแบบเดียวกับ 2.5 แล้วรัน:</p>
+<pre>nw provisioning.provision    # ~ dependency ACC-SW-01 -> CORE-SW-01 … และ PASS
+nw provisioning.provision    # 0 changes
+nw provisioning.verify       # verify: PASS
+nw provisioning.export</pre>
+
+<div class="note"><b>ตรวจแล้วกับ 7.0.29 (15 ต.ค.):</b> <code>trigger.adddependencies</code> ไม่มีแล้ว (<code>-32601 Method not found</code>) แต่ <code>trigger.update</code> + <code>dependencies</code> ใส่ให้ trigger ที่มาจาก template ในระดับ host ได้ ถ้าเปลี่ยน version แล้ว provision พิมพ์ <code>! dependency …</code> ให้รัน <code>engine trigger.get @{host="ACC-SW-01"; output=@("triggerid"); selectDependencies=@("triggerid")}</code> ดูว่า dependency ติดหรือไม่</div>
+
+<h3>ทดสอบ dependency (ไม่ต้องดับระบบจริง)</h3>
+<ol>
+<li>ใน UI เปิด host <b>CORE-SW-01</b> แล้วเปลี่ยน IP ของ interface เป็น IP ที่ไม่มีอยู่จริง (เช่น <code>10.10.0.254</code>) แล้วกด Update
+จากนั้นรอจนเห็น problem <code>Unavailable by ICMP ping</code> ของ core (ประมาณ 3 นาที: ping ทุก 1 นาที × 3 ครั้ง)</li>
+<li>ทำแบบเดียวกันกับ <b>ACC-SW-01</b> แล้วรออีก 6 นาที (นานกว่า <code>{$SNMP.TIMEOUT}</code> 5 นาที เพื่อให้ <code>No SNMP data collection</code> มีโอกาส fire ด้วย)</li>
+<li><code>portal /api/problems | Select-Object device_ref, title</code> (ต้อง <code>portal-login</code> ก่อน ตาม 2.6)</li>
+<li>คืนค่า IP ด้วย <code>nw provisioning.provision</code> ซึ่งจะพิมพ์ <code>~ host … interface updated</code> 2 บรรทัด เพราะ provision แก้ IP กลับให้ตรงกับ CSV</li>
+</ol>
+<div class="pass"><b>ผ่านเมื่อ:</b> ขั้นที่ 3 เห็น problem เดียว คือ <code>Unavailable by ICMP ping</code> ของ <code>CORE-SW-01</code>
+ส่วน ACC-SW-01 ไม่มีทั้ง ICMP และ SNMP problem และ core เองก็ไม่มี <code>No SNMP data collection</code> (เพราะ depend on ICMP ของตัวเอง)
+หลังคืนค่า IP แล้ว problem ของ core ต้อง resolve ภายในไม่กี่นาที</div>
+<div class="note">ไม่ใช้วิธีลบ SNMP ACL บนสวิตช์ เพราะ reachability ยึด <b>ICMP</b> (ขั้น 2.2) การปิด SNMP จะทำให้ ping ยังผ่าน ICMP trigger จึงไม่ fire และทดสอบ dependency ไม่ได้
+วิธีเปลี่ยน IP ในฝั่ง engine ไม่แตะอุปกรณ์จริงเลย และ provision คืนค่าให้เอง</div>
+
+<h4>ข้อผิดพลาดที่พบบ่อย</h4>
+<ul>
+<li>เปลี่ยน IP ของ access ก่อน core ทำให้ trigger ของ access fire ไปก่อน เพราะ dependency มีผลเฉพาะตอนที่ master อยู่ในสถานะ PROBLEM แล้วเท่านั้น</li>
+<li>ลืมคืนค่า IP: <code>nw provisioning.verify</code> จะ FAIL ที่ SNMP interface ให้รัน <code>nw provisioning.provision</code></li>
+<li>เปลี่ยน <code>technical_name</code> ใน CSV ระหว่าง rollout จะได้ host ใหม่ และประวัติของตัวเดิมขาดหาย (ADR 0006) ถ้าจะเปลี่ยนชื่อที่แสดง ให้แก้ <code>display_name</code> แทน</li>
+<li>AP แสดงสถานะ <code>unknown</code> เป็นเรื่องปกติ เพราะ interface ของ AP เป็นแค่ที่ใส่ IP สำหรับ ping จนกว่าจะปิด decision #1</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>12. เงื่อนไขปิด phase: คำสั่งตรวจรวม</h2>
+<pre>nw provisioning.provision        # 0 changes, ทุก tenant PASS
+nw provisioning.verify           # verify: PASS
+nw provisioning.export           # unchanged ทุกไฟล์
+Select-String passphrase templates\netwatch\hosts\*.yaml | ForEach-Object { $_.Line.Trim() } | Sort-Object -Unique
+# มีแค่ {$SNMPV3.AUTH} / {$SNMPV3.PRIV} ไม่มีรหัสจริง
+cd backend; .venv\Scripts\python -m pytest -q; cd ..
+boundary</pre>
+<p>นอกจากนี้ throughput 3 พอร์ตต้องผ่านตาม 2.6 และการทดสอบ dependency ต้องผ่านตาม 2.8</p>
+<p><b>Commit (ทำเอง):</b> <code>provisioning/</code>, <code>templates/upstream/</code>, <code>templates/netwatch/</code>, การแก้ mapper และ test, และ ADR 0009</p>
+
+<!-- ============================================================ -->
+<h2>13. Decision และงานที่ยังไม่ได้ทำ</h2>
+<table>
+<tr><th>เรื่อง</th><th>สถานะ</th><th>ทำเมื่อไร</th></tr>
+<tr><td>ADR 0009: ชื่อ metric มาจาก item tag <code>metric</code></td><td>ต้องเขียนในขั้น 2.3</td><td>Phase 2</td></tr>
+<tr><td>Aruba template (decision #1)</td><td>OPEN รอ PO ของลูกค้า ตอนนี้ใช้ ICMP</td><td>เมื่อได้ PO แล้ว ให้ทำ master item + dependent item ด้วย JSONPath</td></tr>
+<tr><td>Proxy on-site (decision #3)</td><td>OPEN</td><td>ก่อน rollout site ที่ต้อง poll ข้าม WAN</td></tr>
+<tr><td>Units ของ metric</td><td>ยังไม่มีใน payload</td><td>เมื่อ frontend ต้องใช้ (Phase 3)</td></tr>
+<tr><td><code>lab/demo/feeder.py</code></td><td>ยังไม่ได้ทำ</td><td>หลัง 2.8 สำหรับ demo ที่ไม่มีอุปกรณ์จริง</td></tr>
+<tr><td>Rename acme → NetWatch (DB, connector, cookie)</td><td>ยังไม่ได้ทำ</td><td>ทำแยกได้ทุกเมื่อ</td></tr>
+<tr><td><code>lab_tenant.py</code></td><td>ยังใช้ได้ แต่ <code>provision.py</code> มาแทนแล้ว</td><td>ลบหลัง Phase 2 ปิด</td></tr>
+</table>
+<p>เมื่อ Phase 2 ปิดแล้ว Phase 3 (frontend) จะมีข้อมูลจริงให้แสดง โดย read API จาก 1.6 ไม่ต้องเปลี่ยน</p>
+
+</body>
+</html>
